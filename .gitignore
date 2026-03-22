@@ -1,0 +1,43 @@
+# Build output
+/build/
+/out/
+/bin/
+/lib/
+/cmake-build-*/
+
+# CMake generated files
+/CMakeCache.txt
+/CMakeFiles/
+/Testing/
+/install_manifest.txt
+/compile_commands.json
+/cmake_install.cmake
+/CTestTestfile.cmake
+/.cmake/
+
+# Visual Studio
+/.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+
+# Intermediate / debug symbols
+*.obj
+*.pdb
+*.ilk
+*.ipdb
+*.iobj
+*.exp
+*.lib
+*.dll
+*.exe
+*.asi
+
+# Logs and local runtime files
+*.log
+
+# Vendored dependency nested git metadata
+/deps/safetyhook/.git/
