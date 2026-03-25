@@ -5,8 +5,8 @@
 #include <string>
 
 struct StatConfig {
-    double consumption_multiplier = 0.5;
-    double heal_multiplier = 2.0;
+    double consumption_multiplier = 1.0;
+    double heal_multiplier = 1.0;
 };
 
 struct DamageConfig {
@@ -29,9 +29,9 @@ struct ModConfig {
     GeneralConfig general;
     DamageConfig damage;
     ItemConfig items;
-    StatConfig health;
-    StatConfig stamina;
-    StatConfig spirit;
+    StatConfig health{0.5, 2.0};
+    StatConfig stamina{0.5, 1.0};
+    StatConfig spirit{0.5, 2.0};
 };
 
 bool LoadConfig(const std::wstring& config_path);

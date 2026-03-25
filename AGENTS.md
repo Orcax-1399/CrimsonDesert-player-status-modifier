@@ -199,7 +199,7 @@ HealMultiplier=2.0
 
 [Stamina]
 ConsumptionMultiplier=0.5
-HealMultiplier=2.0
+HealMultiplier=1.0
 
 [Spirit]
 ConsumptionMultiplier=0.5
@@ -209,7 +209,7 @@ HealMultiplier=2.0
 含义：
 
 - `ConsumptionMultiplier=0.5` 表示消耗减半
-- `HealMultiplier=2.0` 表示回复翻倍
+- `HealMultiplier` 会放大该属性的回复写入；对 `Stamina` 来说也包括自然回耐
 - `Damage.Multiplier=2.0` 表示玩家伤害翻倍
 - `Items.GainMultiplier=2.0` 表示物品获得翻倍
 

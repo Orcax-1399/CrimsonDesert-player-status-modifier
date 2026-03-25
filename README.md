@@ -29,6 +29,8 @@ The mod currently supports the following configurable features through `player-s
 - Player damage multiplier
 - Item gain multiplier
 
+`Stamina.HealMultiplier` also affects natural stamina regeneration. The default is kept at `1.0` so reduced stamina consumption does not also speed up passive recovery unless you want that behavior.
+
 Default config:
 
 ```ini
@@ -51,7 +53,7 @@ HealMultiplier=2.0
 
 [Stamina]
 ConsumptionMultiplier=0.5
-HealMultiplier=2.0
+HealMultiplier=1.0
 
 [Spirit]
 ConsumptionMultiplier=0.5

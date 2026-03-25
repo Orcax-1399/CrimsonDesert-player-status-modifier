@@ -40,33 +40,24 @@ bool ShouldLogSample(std::atomic<std::uint32_t>& counter, const std::uint32_t li
 }
 
 void PlayerPointerCallback(SafetyHookContext& ctx) {
-    const uintptr_t actor = ctx.rdx;
+    const uintptr_t owner = ctx.rax;
     const bool log_sample = ShouldLogSample(g_player_pointer_samples, 16);
     if (log_sample) {
-        Log("hooks: player-pointer callback actor=0x%p rax=0x%p rsi=0x%p rdx=0x%p",
-            reinterpret_cast<void*>(actor),
+        Log("hooks: player-pointer callback owner=0x%p rax=0x%p rsi=0x%p rdx=0x%p",
+            reinterpret_cast<void*>(owner),
             reinterpret_cast<void*>(ctx.rax),
             reinterpret_cast<void*>(ctx.rsi),
             reinterpret_cast<void*>(ctx.rdx));
     }
 
-    if (actor < kMinimumPointerAddress) {
+    if (owner < kMinimumPointerAddress) {
         if (log_sample) {
-            Log("hooks: player-pointer skipped, actor below threshold");
+            Log("hooks: player-pointer skipped, owner below threshold");
         }
         return;
     }
 
     __try {
-        const auto owner = *reinterpret_cast<const uintptr_t*>(actor + 0x68);
-        if (log_sample) {
-            Log("hooks: player-pointer owner=0x%p", reinterpret_cast<void*>(owner));
-        }
-
-        if (owner < kMinimumPointerAddress) {
-            return;
-        }
-
         const auto component = *reinterpret_cast<const uintptr_t*>(owner + 0x20);
         if (log_sample) {
             Log("hooks: player-pointer component=0x%p", reinterpret_cast<void*>(component));
@@ -76,7 +67,7 @@ void PlayerPointerCallback(SafetyHookContext& ctx) {
             return;
         }
 
-        UpdateTrackedPlayerStatusComponent(actor, component);
+        UpdateTrackedPlayerStatusComponent(owner, component);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         if (!g_reported_player_exception.exchange(true, std::memory_order_acq_rel)) {
             Log("hooks: exception 0x%08lX inside player-pointer hook", GetExceptionCode());
@@ -195,19 +186,19 @@ void ItemGainCallback(SafetyHookContext& ctx) {
 }
 
 bool InstallPlayerPointerHook() {
-    const uintptr_t target = ScanForPlayerPointerCapture();
-    if (target == 0) {
+    const auto target = ScanForPlayerPointerCapture();
+    if (target.address == 0) {
         return false;
     }
 
-    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), PlayerPointerCallback);
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target.address), PlayerPointerCallback);
     if (!hook_result.has_value()) {
         Log("hooks: failed to create player-pointer mid hook");
         return false;
     }
 
     g_player_pointer_hook = std::move(*hook_result);
-    Log("hooks: installed player-pointer hook at 0x%p", reinterpret_cast<void*>(target));
+    Log("hooks: installed player-pointer hook at 0x%p", reinterpret_cast<void*>(target.address));
     return true;
 }
 

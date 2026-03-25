@@ -182,23 +182,9 @@ uintptr_t ScanInSections(const PatternDefinition* definitions,
                 return matches.front().address + definition.hook_offset;
             }
 
-            if (!matches.empty()) {
-                uintptr_t executable_match = 0;
-                std::size_t executable_match_count = 0;
-                for (const auto& match : matches) {
-                    for (const auto& section : sections) {
-                        if (section.section_name == match.section_name && section.executable) {
-                            executable_match = match.address;
-                            ++executable_match_count;
-                            break;
-                        }
-                    }
-                }
-
-                if (executable_match_count == 1) {
-                    Log("scanner: %s pattern '%s' selecting unique executable-section match", scan_name, definition.name);
-                    return executable_match + definition.hook_offset;
-                }
+            if (matches.size() > 1) {
+                Log("scanner: %s pattern '%s' is ambiguous; refusing hook installation", scan_name, definition.name);
+                return 0;
             }
         }
     }
@@ -208,21 +194,22 @@ uintptr_t ScanInSections(const PatternDefinition* definitions,
 
 }  // namespace
 
-uintptr_t ScanForPlayerPointerCapture() {
+PlayerPointerCaptureTarget ScanForPlayerPointerCapture() {
     static constexpr PatternDefinition kPatterns[] = {
         {
             "primary",
-            "48 8B 42 68 48 8D 56 58 ?? 8D ?? 24 ?? ?? 00 00 ?? 8B ?? ?? ?? 00 00 E8 ?? ?? ?? ?? 84 C0 75",
-            0,
+            "0F B6 ? ? 8B ? ? 48 8B 58 40 48 8B 43 08 ? 8D ? 08 33 ? ? 85 ? ? 0F 44",
+            7,
         },
     };
 
     const auto match = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]), "player-pointer");
     if (match == 0) {
         Log("scanner: player-pointer pattern not found");
+        return {};
     }
 
-    return match;
+    return {match};
 }
 
 uintptr_t ScanForDamageValueAccess() {

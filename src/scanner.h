@@ -2,8 +2,12 @@
 
 #include <cstdint>
 
+struct PlayerPointerCaptureTarget {
+    uintptr_t address = 0;
+};
+
 uintptr_t ScanForDamageValueAccess();
 uintptr_t ScanForItemGainAccess();
-uintptr_t ScanForPlayerPointerCapture();
+PlayerPointerCaptureTarget ScanForPlayerPointerCapture();
 uintptr_t ScanForStatsAccess();
 uintptr_t ScanForStatWriteAccess();
