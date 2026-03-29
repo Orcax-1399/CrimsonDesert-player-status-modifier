@@ -167,9 +167,13 @@ void UpdateTrackedPlayerStatusComponent(const uintptr_t actor, const uintptr_t c
         return;
     }
 
-    std::lock_guard lock(g_state_mutex);
     const auto current_marker = g_player_status_marker.load(std::memory_order_acquire);
     if (current_marker == component) {
+        return;
+    }
+
+    std::lock_guard lock(g_state_mutex);
+    if (g_player_status_marker.load(std::memory_order_acquire) == component) {
         return;
     }
 

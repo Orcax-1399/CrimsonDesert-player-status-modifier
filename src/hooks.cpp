@@ -24,7 +24,6 @@ SafetyHookMid g_stat_write_hook{};
 SafetyHookMid g_damage_hook{};
 SafetyHookMid g_item_gain_hook{};
 std::atomic<bool> g_reported_stats_exception{false};
-std::atomic<bool> g_reported_player_exception{false};
 std::atomic<bool> g_reported_stat_write_exception{false};
 std::atomic<bool> g_reported_damage_exception{false};
 std::atomic<bool> g_reported_item_gain_exception{false};
@@ -40,39 +39,26 @@ bool ShouldLogSample(std::atomic<std::uint32_t>& counter, const std::uint32_t li
 }
 
 void PlayerPointerCallback(SafetyHookContext& ctx) {
-    const uintptr_t owner = ctx.rax;
+    const uintptr_t actor = ctx.rax;
+    const uintptr_t status_marker = ctx.rsi;
     const bool log_sample = ShouldLogSample(g_player_pointer_samples, 16);
     if (log_sample) {
-        Log("hooks: player-pointer callback owner=0x%p rax=0x%p rsi=0x%p rdx=0x%p",
-            reinterpret_cast<void*>(owner),
+        Log("hooks: player-pointer callback actor=0x%p marker=0x%p rax=0x%p rsi=0x%p rdx=0x%p",
+            reinterpret_cast<void*>(actor),
+            reinterpret_cast<void*>(status_marker),
             reinterpret_cast<void*>(ctx.rax),
             reinterpret_cast<void*>(ctx.rsi),
             reinterpret_cast<void*>(ctx.rdx));
     }
 
-    if (owner < kMinimumPointerAddress) {
+    if (actor < kMinimumPointerAddress || status_marker < kMinimumPointerAddress) {
         if (log_sample) {
-            Log("hooks: player-pointer skipped, owner below threshold");
+            Log("hooks: player-pointer skipped, actor/marker below threshold");
         }
         return;
     }
 
-    __try {
-        const auto component = *reinterpret_cast<const uintptr_t*>(owner + 0x20);
-        if (log_sample) {
-            Log("hooks: player-pointer component=0x%p", reinterpret_cast<void*>(component));
-        }
-
-        if (component < kMinimumPointerAddress) {
-            return;
-        }
-
-        UpdateTrackedPlayerStatusComponent(owner, component);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        if (!g_reported_player_exception.exchange(true, std::memory_order_acq_rel)) {
-            Log("hooks: exception 0x%08lX inside player-pointer hook", GetExceptionCode());
-        }
-    }
+    UpdateTrackedPlayerStatusComponent(actor, status_marker);
 }
 
 void StatsCallback(SafetyHookContext& ctx) {
