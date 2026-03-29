@@ -198,8 +198,13 @@ PlayerPointerCaptureTarget ScanForPlayerPointerCapture() {
     static constexpr PatternDefinition kPatterns[] = {
         {
             "primary",
-            "0F B6 ? ? 8B ? ? 48 8B 58 40 48 8B 43 08 ? 8D ? 08 33 ? ? 85 ? ? 0F 44",
-            7,
+            "48 8B 41 68 48 8B 48 20 48 89 4D 90 48 8B 01 48 8D 55 80 FF 90 88 01 00 00",
+            4,
+        },
+        {
+            "fallback",
+            "49 8B 47 08 48 8B 40 68 48 8B 48 20 48 8B 01 4C 8B CB 4D 8B C4 49 8B D5 FF 90 78 01 00 00",
+            8,
         },
     };
 
