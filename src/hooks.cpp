@@ -179,6 +179,20 @@ void PositionHeightCallback(SafetyHookContext& ctx) {
         return;
     }
 
+    float horizontal_multiplier = 1.0f;
+    if (ConsumeHorizontalMultiplier(&horizontal_multiplier) && horizontal_multiplier != 1.0f) {
+        __try {
+            const auto* const current_position = reinterpret_cast<const float*>(ctx.r13);
+            const float base_x = current_position[0];
+            const float base_z = current_position[2];
+            const float delta_x = ctx.xmm0.f32[0] - base_x;
+            const float delta_z = ctx.xmm0.f32[2] - base_z;
+            ctx.xmm0.f32[0] = base_x + delta_x * horizontal_multiplier;
+            ctx.xmm0.f32[2] = base_z + delta_z * horizontal_multiplier;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+    }
+
     float height_delta = 0.0f;
     if (!ConsumeHeightAdjustment(&height_delta)) {
         return;
@@ -273,10 +287,6 @@ bool InstallItemGainHook() {
 }
 
 bool InstallPositionHeightHook() {
-    if (!IsPositionControlEnabled()) {
-        return true;
-    }
-
     const uintptr_t target = ScanForPositionHeightAccess();
     if (target == 0) {
         return false;
@@ -297,8 +307,7 @@ bool InstallPositionHeightHook() {
 
 bool InstallHooks() {
     std::lock_guard lock(g_hook_mutex);
-    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_hook && g_item_gain_hook &&
-        (!IsPositionControlEnabled() || g_position_height_hook)) {
+    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_hook && g_item_gain_hook) {
         return true;
     }
 
@@ -332,16 +341,16 @@ bool InstallHooks() {
         return false;
     }
 
-    if (!InstallPositionHeightHook()) {
-        g_item_gain_hook.reset();
-        g_damage_hook.reset();
-        g_stat_write_hook.reset();
-        g_stats_hook.reset();
-        g_player_pointer_hook.reset();
-        return false;
+    if (!g_position_height_hook && !InstallPositionHeightHook()) {
+        Log("hooks: position-height hook unavailable; continuing without position control");
     }
 
     return true;
+}
+
+bool IsPositionHeightHookInstalled() {
+    std::lock_guard lock(g_hook_mutex);
+    return static_cast<bool>(g_position_height_hook);
 }
 
 void RemoveHooks() {

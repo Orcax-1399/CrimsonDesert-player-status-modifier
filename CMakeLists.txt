@@ -13,6 +13,7 @@ add_subdirectory(deps/safetyhook)
 
 add_library(player-status-modifier SHARED
     src/config.cpp
+    src/config_watcher.cpp
     src/dllmain.cpp
     src/hooks.cpp
     src/key_listener.cpp

@@ -1,11 +1,15 @@
 #include "config.h"
 
+#include <atomic>
 #include <cmath>
 #include <cwchar>
+#include <memory>
+#include <mutex>
 
 namespace {
 
-ModConfig g_config{};
+std::atomic<std::shared_ptr<const ModConfig>> g_config{std::make_shared<const ModConfig>(ModConfig{})};
+std::mutex g_config_path_mutex;
 std::wstring g_config_path;
 
 bool ReadBool(const wchar_t* section, const wchar_t* key, const bool default_value, const std::wstring& path) {
@@ -30,9 +34,43 @@ double ReadDouble(const wchar_t* section, const wchar_t* key, const double defau
     return parsed;
 }
 
+void SanitizeConfig(ModConfig* const next) {
+    if (next == nullptr) {
+        return;
+    }
+
+    if (next->general.stale_component_ms == 0) {
+        next->general.stale_component_ms = 60000;
+    }
+
+    if (next->general.relock_idle_ms == 0) {
+        next->general.relock_idle_ms = 10000;
+    }
+
+    if (next->position_control.key <= 0) {
+        next->position_control.key = VK_F6;
+    }
+
+    if (!std::isfinite(next->position_control.amplitude) || next->position_control.amplitude < 0.0f) {
+        next->position_control.amplitude = 0.1f;
+    }
+
+    if (next->position_control.horizontal_key <= 0) {
+        next->position_control.horizontal_key = VK_F7;
+    }
+
+    if (!std::isfinite(next->position_control.horizontal_multiplier) || next->position_control.horizontal_multiplier < 0.0f) {
+        next->position_control.horizontal_multiplier = 1.5f;
+    }
+}
+
 }  // namespace
 
-bool LoadConfig(const std::wstring& config_path) {
+bool ReadConfigSnapshot(const std::wstring& config_path, ModConfig* const config) {
+    if (config == nullptr) {
+        return false;
+    }
+
     ModConfig next{};
 
     next.general.enabled = ReadBool(L"General", L"Enabled", next.general.enabled, config_path);
@@ -49,6 +87,12 @@ bool LoadConfig(const std::wstring& config_path) {
         static_cast<int>(ReadDword(L"Position Control(Height)", L"Key", static_cast<DWORD>(next.position_control.key), config_path));
     next.position_control.amplitude = static_cast<float>(
         ReadDouble(L"Position Control(Height)", L"Amplitude", next.position_control.amplitude, config_path));
+    next.position_control.horizontal_enabled =
+        ReadBool(L"Position Control(Horizontal)", L"Enable", next.position_control.horizontal_enabled, config_path);
+    next.position_control.horizontal_key = static_cast<int>(
+        ReadDword(L"Position Control(Horizontal)", L"Key", static_cast<DWORD>(next.position_control.horizontal_key), config_path));
+    next.position_control.horizontal_multiplier = static_cast<float>(ReadDouble(
+        L"Position Control(Horizontal)", L"Multiplier", next.position_control.horizontal_multiplier, config_path));
 
     next.health.consumption_multiplier = ReadDouble(L"Health", L"ConsumptionMultiplier", next.health.consumption_multiplier, config_path);
     next.health.heal_multiplier = ReadDouble(L"Health", L"HealMultiplier", next.health.heal_multiplier, config_path);
@@ -59,31 +103,38 @@ bool LoadConfig(const std::wstring& config_path) {
     next.spirit.consumption_multiplier = ReadDouble(L"Spirit", L"ConsumptionMultiplier", next.spirit.consumption_multiplier, config_path);
     next.spirit.heal_multiplier = ReadDouble(L"Spirit", L"HealMultiplier", next.spirit.heal_multiplier, config_path);
 
-    if (next.general.stale_component_ms == 0) {
-        next.general.stale_component_ms = 60000;
-    }
-
-    if (next.general.relock_idle_ms == 0) {
-        next.general.relock_idle_ms = 10000;
-    }
-
-    if (next.position_control.key <= 0) {
-        next.position_control.key = VK_F6;
-    }
-
-    if (!std::isfinite(next.position_control.amplitude) || next.position_control.amplitude < 0.0f) {
-        next.position_control.amplitude = 0.1f;
-    }
-
-    g_config = next;
-    g_config_path = config_path;
+    SanitizeConfig(&next);
+    *config = next;
     return true;
 }
 
-const ModConfig& GetConfig() {
-    return g_config;
+void SetConfigSnapshot(const std::wstring& config_path, const ModConfig& config) {
+    g_config.store(std::make_shared<const ModConfig>(config), std::memory_order_release);
+
+    std::lock_guard lock(g_config_path_mutex);
+    g_config_path = config_path;
 }
 
-const std::wstring& GetLoadedConfigPath() {
+bool LoadConfig(const std::wstring& config_path) {
+    ModConfig next{};
+    if (!ReadConfigSnapshot(config_path, &next)) {
+        return false;
+    }
+
+    SetConfigSnapshot(config_path, next);
+    return true;
+}
+
+ModConfig GetConfig() {
+    const auto snapshot = g_config.load(std::memory_order_acquire);
+    if (!snapshot) {
+        return {};
+    }
+
+    return *snapshot;
+}
+
+std::wstring GetLoadedConfigPath() {
+    std::lock_guard lock(g_config_path_mutex);
     return g_config_path;
 }

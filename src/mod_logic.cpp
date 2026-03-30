@@ -30,17 +30,23 @@ std::atomic<std::uint32_t> g_process_skip_logs{0};
 std::atomic<std::uint32_t> g_process_apply_logs{0};
 std::atomic<std::uint32_t> g_discovery_logs{0};
 
-const StatConfig* SelectConfig(const int32_t stat_type) {
-    const auto& config = GetConfig();
+bool SelectConfig(const ModConfig& config, const int32_t stat_type, StatConfig* const selected) {
+    if (selected == nullptr) {
+        return false;
+    }
+
     switch (stat_type) {
     case kHealthId:
-        return &config.health;
+        *selected = config.health;
+        return true;
     case kStaminaId:
-        return &config.stamina;
+        *selected = config.stamina;
+        return true;
     case kSpiritId:
-        return &config.spirit;
+        *selected = config.spirit;
+        return true;
     default:
-        return nullptr;
+        return false;
     }
 }
 
@@ -304,8 +310,8 @@ bool TryAdjustStatWrite(const uintptr_t entry, int64_t* const value) {
         return false;
     }
 
-    const auto* const stat_config = SelectConfig(stat_type);
-    if (stat_config == nullptr) {
+    StatConfig stat_config{};
+    if (!SelectConfig(config, stat_type, &stat_config)) {
         return false;
     }
 
@@ -317,12 +323,12 @@ bool TryAdjustStatWrite(const uintptr_t entry, int64_t* const value) {
 
     if (delta < 0) {
         const int64_t consumed = -delta;
-        const int64_t target_consumption = ScaleDelta(consumed, stat_config->consumption_multiplier);
+        const int64_t target_consumption = ScaleDelta(consumed, stat_config.consumption_multiplier);
         const int64_t adjustment = consumed - target_consumption;
         adjusted_value = ClampToRange(requested_value + adjustment, 0, max_value);
     } else {
         const int64_t healed = delta;
-        const int64_t target_heal = ScaleDelta(healed, stat_config->heal_multiplier);
+        const int64_t target_heal = ScaleDelta(healed, stat_config.heal_multiplier);
         const int64_t adjustment = target_heal - healed;
         adjusted_value = ClampToRange(requested_value + adjustment, 0, max_value);
     }

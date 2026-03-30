@@ -12,20 +12,59 @@ namespace {
 
 std::mutex g_log_mutex;
 std::ofstream g_log_stream;
+std::filesystem::path g_log_path;
 bool g_log_enabled = false;
+
+bool OpenLogStream(const std::ios::openmode mode) {
+    if (g_log_path.empty()) {
+        return false;
+    }
+
+    if (g_log_stream.is_open()) {
+        g_log_stream.flush();
+        g_log_stream.close();
+    }
+
+    g_log_stream.open(g_log_path, mode | std::ios::binary);
+    return g_log_stream.is_open();
+}
 
 }  // namespace
 
 bool InitializeLogger(const std::wstring& path, const bool enabled) {
     std::lock_guard lock(g_log_mutex);
 
+    g_log_path = std::filesystem::path(path);
     g_log_enabled = enabled;
     if (!g_log_enabled) {
+        if (g_log_stream.is_open()) {
+            g_log_stream.flush();
+            g_log_stream.close();
+        }
         return true;
     }
 
-    g_log_stream.open(std::filesystem::path(path), std::ios::out | std::ios::trunc | std::ios::binary);
-    return g_log_stream.is_open();
+    return OpenLogStream(std::ios::out | std::ios::trunc);
+}
+
+void SetLoggerEnabled(const bool enabled) {
+    std::lock_guard lock(g_log_mutex);
+
+    if (!enabled) {
+        if (g_log_stream.is_open()) {
+            g_log_stream.flush();
+            g_log_stream.close();
+        }
+        g_log_enabled = false;
+        return;
+    }
+
+    if (!g_log_stream.is_open() && !OpenLogStream(std::ios::out | std::ios::app)) {
+        g_log_enabled = false;
+        return;
+    }
+
+    g_log_enabled = true;
 }
 
 void ShutdownLogger() {

@@ -1,4 +1,5 @@
 #include "config.h"
+#include "config_watcher.h"
 #include "hooks.h"
 #include "logger.h"
 #include "mod_logic.h"
@@ -45,10 +46,22 @@ DWORD WINAPI InitializeMod(LPVOID) {
         return 0;
     }
 
+    ModConfig config = GetConfig();
+    if ((config.position_control.enabled || config.position_control.horizontal_enabled) && !IsPositionHeightHookInstalled()) {
+        config.position_control.enabled = false;
+        config.position_control.horizontal_enabled = false;
+        SetConfigSnapshot(config_path, config);
+        Log("dllmain: position control requested but position hook is unavailable; disabling position control");
+    }
+
     if (!InitializePositionControl()) {
         Log("dllmain: position control initialization failed");
         RemoveHooks();
         return 0;
+    }
+
+    if (!StartConfigWatcher()) {
+        Log("dllmain: config watcher failed to start");
     }
 
     Log("dllmain: initialization finished");
@@ -67,6 +80,7 @@ BOOL APIENTRY DllMain(HMODULE module, const DWORD reason, LPVOID) {
             CloseHandle(thread);
         }
     } else if (reason == DLL_PROCESS_DETACH) {
+        StopConfigWatcher();
         ShutdownPositionControl();
         RemoveHooks();
         ShutdownLogger();
