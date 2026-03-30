@@ -2,6 +2,7 @@
 #include "hooks.h"
 #include "logger.h"
 #include "mod_logic.h"
+#include "position_control.h"
 
 #include <Windows.h>
 
@@ -44,6 +45,12 @@ DWORD WINAPI InitializeMod(LPVOID) {
         return 0;
     }
 
+    if (!InitializePositionControl()) {
+        Log("dllmain: position control initialization failed");
+        RemoveHooks();
+        return 0;
+    }
+
     Log("dllmain: initialization finished");
     return 0;
 }
@@ -60,6 +67,7 @@ BOOL APIENTRY DllMain(HMODULE module, const DWORD reason, LPVOID) {
             CloseHandle(thread);
         }
     } else if (reason == DLL_PROCESS_DETACH) {
+        ShutdownPositionControl();
         RemoveHooks();
         ShutdownLogger();
     }

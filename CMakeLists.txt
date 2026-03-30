@@ -15,8 +15,10 @@ add_library(player-status-modifier SHARED
     src/config.cpp
     src/dllmain.cpp
     src/hooks.cpp
+    src/key_listener.cpp
     src/logger.cpp
     src/mod_logic.cpp
+    src/position_control.cpp
     src/scanner.cpp
 )
 

@@ -1,7 +1,9 @@
 #include "hooks.h"
 
+#include "config.h"
 #include "logger.h"
 #include "mod_logic.h"
+#include "position_control.h"
 #include "scanner.h"
 
 #include <Windows.h>
@@ -23,6 +25,7 @@ SafetyHookMid g_stats_hook{};
 SafetyHookMid g_stat_write_hook{};
 SafetyHookMid g_damage_hook{};
 SafetyHookMid g_item_gain_hook{};
+SafetyHookMid g_position_height_hook{};
 std::atomic<bool> g_reported_stats_exception{false};
 std::atomic<bool> g_reported_stat_write_exception{false};
 std::atomic<bool> g_reported_damage_exception{false};
@@ -171,6 +174,19 @@ void ItemGainCallback(SafetyHookContext& ctx) {
     }
 }
 
+void PositionHeightCallback(SafetyHookContext& ctx) {
+    if (ctx.r13 < kMinimumPointerAddress) {
+        return;
+    }
+
+    float height_delta = 0.0f;
+    if (!ConsumeHeightAdjustment(&height_delta)) {
+        return;
+    }
+
+    ctx.xmm0.f32[1] += height_delta;
+}
+
 bool InstallPlayerPointerHook() {
     const auto target = ScanForPlayerPointerCapture();
     if (target.address == 0) {
@@ -256,11 +272,33 @@ bool InstallItemGainHook() {
     return true;
 }
 
+bool InstallPositionHeightHook() {
+    if (!IsPositionControlEnabled()) {
+        return true;
+    }
+
+    const uintptr_t target = ScanForPositionHeightAccess();
+    if (target == 0) {
+        return false;
+    }
+
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), PositionHeightCallback);
+    if (!hook_result.has_value()) {
+        Log("hooks: failed to create position-height mid hook");
+        return false;
+    }
+
+    g_position_height_hook = std::move(*hook_result);
+    Log("hooks: installed position-height hook at 0x%p", reinterpret_cast<void*>(target));
+    return true;
+}
+
 }  // namespace
 
 bool InstallHooks() {
     std::lock_guard lock(g_hook_mutex);
-    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_hook && g_item_gain_hook) {
+    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_hook && g_item_gain_hook &&
+        (!IsPositionControlEnabled() || g_position_height_hook)) {
         return true;
     }
 
@@ -294,6 +332,15 @@ bool InstallHooks() {
         return false;
     }
 
+    if (!InstallPositionHeightHook()) {
+        g_item_gain_hook.reset();
+        g_damage_hook.reset();
+        g_stat_write_hook.reset();
+        g_stats_hook.reset();
+        g_player_pointer_hook.reset();
+        return false;
+    }
+
     return true;
 }
 
@@ -303,6 +350,11 @@ void RemoveHooks() {
     if (g_item_gain_hook) {
         g_item_gain_hook.reset();
         Log("hooks: removed item-gain hook");
+    }
+
+    if (g_position_height_hook) {
+        g_position_height_hook.reset();
+        Log("hooks: removed position-height hook");
     }
 
     if (g_damage_hook) {

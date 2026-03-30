@@ -43,6 +43,12 @@ bool LoadConfig(const std::wstring& config_path) {
 
     next.damage.multiplier = ReadDouble(L"Damage", L"Multiplier", next.damage.multiplier, config_path);
     next.items.gain_multiplier = ReadDouble(L"Items", L"GainMultiplier", next.items.gain_multiplier, config_path);
+    next.position_control.enabled =
+        ReadBool(L"Position Control(Height)", L"Enable", next.position_control.enabled, config_path);
+    next.position_control.key =
+        static_cast<int>(ReadDword(L"Position Control(Height)", L"Key", static_cast<DWORD>(next.position_control.key), config_path));
+    next.position_control.amplitude = static_cast<float>(
+        ReadDouble(L"Position Control(Height)", L"Amplitude", next.position_control.amplitude, config_path));
 
     next.health.consumption_multiplier = ReadDouble(L"Health", L"ConsumptionMultiplier", next.health.consumption_multiplier, config_path);
     next.health.heal_multiplier = ReadDouble(L"Health", L"HealMultiplier", next.health.heal_multiplier, config_path);
@@ -59,6 +65,14 @@ bool LoadConfig(const std::wstring& config_path) {
 
     if (next.general.relock_idle_ms == 0) {
         next.general.relock_idle_ms = 10000;
+    }
+
+    if (next.position_control.key <= 0) {
+        next.position_control.key = VK_F6;
+    }
+
+    if (!std::isfinite(next.position_control.amplitude) || next.position_control.amplitude < 0.0f) {
+        next.position_control.amplitude = 0.1f;
     }
 
     g_config = next;

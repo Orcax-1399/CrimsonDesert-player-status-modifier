@@ -285,6 +285,34 @@ PlayerPointerCaptureTarget ScanForPlayerPointerCapture() {
     return {outcome.address};
 }
 
+uintptr_t ScanForPositionHeightAccess() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "49 3B F7 0F 8C ?? ?? ?? ?? 0F 28 C6 F3 45 0F 5C C8 41 0F 58 45 00 41 0F 11 45 00 48 8B BB F8 00 00 00 48 63 83 00 01 00 00",
+            22,
+        },
+        {
+            "fallback",
+            "0F 28 C6 F3 45 0F 5C C8 41 0F 58 45 00 41 0F 11 45 00",
+            13,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: position-height found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: position-height found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
 uintptr_t ScanForDamageValueAccess() {
     static constexpr PatternDefinition kPatterns[] = {
         {"primary", "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3", 17},

@@ -17,6 +17,12 @@ struct ItemConfig {
     double gain_multiplier = 2.0;
 };
 
+struct PositionControlConfig {
+    bool enabled = false;
+    int key = VK_F6;
+    float amplitude = 0.1f;
+};
+
 struct GeneralConfig {
     bool enabled = true;
     bool log_enabled = true;
@@ -29,6 +35,7 @@ struct ModConfig {
     GeneralConfig general;
     DamageConfig damage;
     ItemConfig items;
+    PositionControlConfig position_control;
     StatConfig health{0.5, 2.0};
     StatConfig stamina{0.5, 1.0};
     StatConfig spirit{0.5, 2.0};

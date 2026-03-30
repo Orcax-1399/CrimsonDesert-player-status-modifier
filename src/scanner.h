@@ -9,5 +9,6 @@ struct PlayerPointerCaptureTarget {
 uintptr_t ScanForDamageValueAccess();
 uintptr_t ScanForItemGainAccess();
 PlayerPointerCaptureTarget ScanForPlayerPointerCapture();
+uintptr_t ScanForPositionHeightAccess();
 uintptr_t ScanForStatsAccess();
 uintptr_t ScanForStatWriteAccess();
