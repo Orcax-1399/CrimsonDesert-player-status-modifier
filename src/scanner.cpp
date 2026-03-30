@@ -34,6 +34,50 @@ struct MatchResult {
     std::string section_name;
 };
 
+enum class ScanStatus {
+    NotFound,
+    Unique,
+    Ambiguous,
+};
+
+struct ScanOutcome {
+    uintptr_t address = 0;
+    ScanStatus status = ScanStatus::NotFound;
+};
+
+SectionSpan EnumerateMainModuleImageSpan() {
+    const auto module = reinterpret_cast<const std::uint8_t*>(GetModuleHandleW(nullptr));
+    if (module == nullptr) {
+        Log("scanner: GetModuleHandleW(nullptr) failed");
+        return {};
+    }
+
+    const auto dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE) {
+        Log("scanner: invalid DOS header");
+        return {};
+    }
+
+    const auto nt_headers = reinterpret_cast<const IMAGE_NT_HEADERS64*>(module + dos_header->e_lfanew);
+    if (nt_headers->Signature != IMAGE_NT_SIGNATURE) {
+        Log("scanner: invalid NT header");
+        return {};
+    }
+
+    const auto image_size = static_cast<std::size_t>(nt_headers->OptionalHeader.SizeOfImage);
+    if (image_size == 0) {
+        Log("scanner: main-module image size is zero");
+        return {};
+    }
+
+    return {
+        module,
+        image_size,
+        "[image]",
+        true,
+    };
+}
+
 std::vector<SectionSpan> EnumerateMainModuleSections(const bool text_only) {
     std::vector<SectionSpan> sections;
 
@@ -79,9 +123,6 @@ std::vector<SectionSpan> EnumerateMainModuleSections(const bool text_only) {
         });
     }
 
-    Log("scanner: enumerated %zu main-module section(s)%s",
-        sections.size(),
-        text_only ? " [text only]" : " [fallback]");
     return sections;
 }
 
@@ -155,9 +196,8 @@ std::vector<MatchResult> ScanPattern(const std::vector<SectionSpan>& spans,
     return results;
 }
 
-uintptr_t ScanInSections(const PatternDefinition* definitions,
-                         const std::size_t definition_count,
-                         const char* scan_name) {
+ScanOutcome ScanInSections(const PatternDefinition* definitions,
+                          const std::size_t definition_count) {
     for (int pass = 0; pass < 2; ++pass) {
         const bool text_only = pass == 0;
         const auto sections = EnumerateMainModuleSections(text_only);
@@ -170,26 +210,49 @@ uintptr_t ScanInSections(const PatternDefinition* definitions,
             const auto pattern = ParsePattern(definition.text);
             const auto matches = ScanPattern(sections, pattern, 16);
 
-            Log("scanner: %s pattern '%s' found %zu match(es)", scan_name, definition.name, matches.size());
-            for (const auto& match : matches) {
-                Log("scanner:   CrimsonDesert.exe!%s @ 0x%p -> hook 0x%p",
-                    match.section_name.c_str(),
-                    reinterpret_cast<void*>(match.address),
-                    reinterpret_cast<void*>(match.address + definition.hook_offset));
-            }
-
             if (matches.size() == 1) {
-                return matches.front().address + definition.hook_offset;
+                return {
+                    matches.front().address + definition.hook_offset,
+                    ScanStatus::Unique,
+                };
             }
 
             if (matches.size() > 1) {
-                Log("scanner: %s pattern '%s' is ambiguous; refusing hook installation", scan_name, definition.name);
-                return 0;
+                return {
+                    0,
+                    ScanStatus::Ambiguous,
+                };
             }
         }
     }
 
-    return 0;
+    const auto image_span = EnumerateMainModuleImageSpan();
+    if (image_span.begin == nullptr || image_span.size == 0) {
+        return {};
+    }
+
+    const std::vector<SectionSpan> image_spans{image_span};
+    for (std::size_t definition_index = 0; definition_index < definition_count; ++definition_index) {
+        const auto& definition = definitions[definition_index];
+        const auto pattern = ParsePattern(definition.text);
+        const auto matches = ScanPattern(image_spans, pattern, 16);
+
+        if (matches.size() == 1) {
+            return {
+                matches.front().address + definition.hook_offset,
+                ScanStatus::Unique,
+            };
+        }
+
+        if (matches.size() > 1) {
+            return {
+                0,
+                ScanStatus::Ambiguous,
+            };
+        }
+    }
+
+    return {};
 }
 
 }  // namespace
@@ -208,13 +271,18 @@ PlayerPointerCaptureTarget ScanForPlayerPointerCapture() {
         },
     };
 
-    const auto match = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]), "player-pointer");
-    if (match == 0) {
-        Log("scanner: player-pointer pattern not found");
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: player-pointer found multiple matches, install failed");
         return {};
     }
 
-    return {match};
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: player-pointer found 0 matches");
+        return {};
+    }
+
+    return {outcome.address};
 }
 
 uintptr_t ScanForDamageValueAccess() {
@@ -222,12 +290,18 @@ uintptr_t ScanForDamageValueAccess() {
         {"primary", "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3", 17},
     };
 
-    const auto match = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]), "damage");
-    if (match == 0) {
-        Log("scanner: damage pattern not found");
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: damage found multiple matches, install failed");
+        return 0;
     }
 
-    return match;
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: damage found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
 }
 
 uintptr_t ScanForItemGainAccess() {
@@ -237,12 +311,18 @@ uintptr_t ScanForItemGainAccess() {
 
     // Known item-loss opcode kept for future work:
     //   49 29 4C 07 10    sub [r15+rax+10], rcx
-    const auto match = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]), "item-gain");
-    if (match == 0) {
-        Log("scanner: item-gain pattern not found");
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: item-gain found multiple matches, install failed");
+        return 0;
     }
 
-    return match;
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: item-gain found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
 }
 
 uintptr_t ScanForStatsAccess() {
@@ -251,12 +331,18 @@ uintptr_t ScanForStatsAccess() {
         {"fallback", "48 C1 E0 04 48 03 46 58", 8},
     };
 
-    const auto match = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]), "stats");
-    if (match == 0) {
-        Log("scanner: stats pattern not found");
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: stats found multiple matches, install failed");
+        return 0;
     }
 
-    return match;
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: stats found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
 }
 
 uintptr_t ScanForStatWriteAccess() {
@@ -273,10 +359,16 @@ uintptr_t ScanForStatWriteAccess() {
         },
     };
 
-    const auto match = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]), "stat-write");
-    if (match == 0) {
-        Log("scanner: stat-write pattern not found");
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: stat-write found multiple matches, install failed");
+        return 0;
     }
 
-    return match;
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: stat-write found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
 }
