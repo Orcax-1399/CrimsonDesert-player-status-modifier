@@ -23,18 +23,27 @@ std::mutex g_hook_mutex;
 SafetyHookMid g_player_pointer_hook{};
 SafetyHookMid g_stats_hook{};
 SafetyHookMid g_stat_write_hook{};
+SafetyHookMid g_damage_slot_hook{};
 SafetyHookMid g_damage_hook{};
 SafetyHookMid g_item_gain_hook{};
+SafetyHookMid g_durability_hook{};
+SafetyHookMid g_durability_delta_hook{};
 SafetyHookMid g_position_height_hook{};
 std::atomic<bool> g_reported_stats_exception{false};
 std::atomic<bool> g_reported_stat_write_exception{false};
 std::atomic<bool> g_reported_damage_exception{false};
 std::atomic<bool> g_reported_item_gain_exception{false};
+std::atomic<bool> g_reported_durability_exception{false};
+std::atomic<bool> g_reported_durability_delta_exception{false};
 std::atomic<std::uint32_t> g_player_pointer_samples{0};
 std::atomic<std::uint32_t> g_stats_samples{0};
 std::atomic<std::uint32_t> g_stat_write_samples{0};
 std::atomic<std::uint32_t> g_damage_samples{0};
 std::atomic<std::uint32_t> g_item_gain_samples{0};
+std::atomic<std::uint32_t> g_durability_samples{0};
+std::atomic<std::uint32_t> g_durability_delta_samples{0};
+thread_local int32_t g_pending_damage_slot = -1;
+thread_local bool g_has_pending_damage_slot = false;
 
 bool ShouldLogSample(std::atomic<std::uint32_t>& counter, const std::uint32_t limit) {
     const auto current = counter.fetch_add(1, std::memory_order_acq_rel);
@@ -122,10 +131,17 @@ void StatWriteCallback(SafetyHookContext& ctx) {
 }
 
 void DamageCallback(SafetyHookContext& ctx) {
+    int32_t slot = -1;
+    if (g_has_pending_damage_slot) {
+        slot = g_pending_damage_slot;
+        g_has_pending_damage_slot = false;
+    }
+
     const bool log_sample = ShouldLogSample(g_damage_samples, 16);
     if (log_sample) {
-        Log("hooks: damage callback r15=0x%p r12=%u rbx=0x%p rip=0x%p",
+        Log("hooks: damage callback r15=0x%p slot=%d r12=%u rbx=0x%p rip=0x%p",
             reinterpret_cast<void*>(ctx.r15),
+            static_cast<int>(slot),
             static_cast<unsigned>(ctx.r12 & 0xFFFFFFFFu),
             reinterpret_cast<void*>(ctx.rbx),
             reinterpret_cast<void*>(ctx.rip));
@@ -137,17 +153,23 @@ void DamageCallback(SafetyHookContext& ctx) {
 
     __try {
         uintptr_t adjusted_value = ctx.rbx;
-        if (TryScalePlayerDamage(ctx.r15, static_cast<int32_t>(ctx.r12 & 0xFFFFFFFFu), &adjusted_value)) {
+        if (TryScalePlayerDamage(ctx.r15, slot, &adjusted_value)) {
             ctx.rbx = adjusted_value;
-            if (log_sample) {
-                Log("hooks: damage scaled to 0x%p", reinterpret_cast<void*>(ctx.rbx));
-            }
+            Log("hooks: damage scaled slot=%d source=0x%p final=0x%p",
+                static_cast<int>(slot),
+                reinterpret_cast<void*>(ctx.r15),
+                reinterpret_cast<void*>(ctx.rbx));
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         if (!g_reported_damage_exception.exchange(true, std::memory_order_acq_rel)) {
             Log("hooks: exception 0x%08lX inside damage hook", GetExceptionCode());
         }
     }
+}
+
+void DamageSlotCallback(SafetyHookContext& ctx) {
+    g_pending_damage_slot = static_cast<int32_t>(ctx.rcx & 0xFFFFFFFFu);
+    g_has_pending_damage_slot = true;
 }
 
 void ItemGainCallback(SafetyHookContext& ctx) {
@@ -170,6 +192,71 @@ void ItemGainCallback(SafetyHookContext& ctx) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         if (!g_reported_item_gain_exception.exchange(true, std::memory_order_acq_rel)) {
             Log("hooks: exception 0x%08lX inside item-gain hook", GetExceptionCode());
+        }
+    }
+}
+
+void DurabilityCallback(SafetyHookContext& ctx) {
+    if (ctx.rbx < kMinimumPointerAddress) {
+        return;
+    }
+
+    const bool log_sample = ShouldLogSample(g_durability_samples, 16);
+    __try {
+        if (log_sample) {
+            Log("hooks: durability callback entry=0x%p old=%u requested=%u rip=0x%p",
+                reinterpret_cast<void*>(ctx.rbx),
+                static_cast<unsigned>(*reinterpret_cast<const uint16_t*>(ctx.rbx + 0x50)),
+                static_cast<unsigned>(ctx.rdi & 0xFFFFu),
+                reinterpret_cast<void*>(ctx.rip));
+        }
+
+        uint16_t adjusted_value = static_cast<uint16_t>(ctx.rdi & 0xFFFFu);
+        if (TryAdjustDurabilityWrite(ctx.rbx, &adjusted_value)) {
+            ctx.rdi = (ctx.rdi & ~static_cast<uintptr_t>(0xFFFFu)) | adjusted_value;
+            if (log_sample) {
+                Log("hooks: durability adjusted entry=0x%p final=%u",
+                    reinterpret_cast<void*>(ctx.rbx),
+                    static_cast<unsigned>(adjusted_value));
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_reported_durability_exception.exchange(true, std::memory_order_acq_rel)) {
+            Log("hooks: exception 0x%08lX inside durability hook", GetExceptionCode());
+        }
+    }
+}
+
+void DurabilityDeltaCallback(SafetyHookContext& ctx) {
+    if (ctx.rbp < kMinimumPointerAddress) {
+        return;
+    }
+
+    const bool log_sample = ShouldLogSample(g_durability_delta_samples, 16);
+    __try {
+        const uint16_t current_value = static_cast<uint16_t>(ctx.rax & 0xFFFFu);
+        int16_t adjusted_delta = static_cast<int16_t>(ctx.r13 & 0xFFFFu);
+
+        if (log_sample) {
+            Log("hooks: durability-delta callback entry=0x%p current=%u delta=%d rip=0x%p",
+                reinterpret_cast<void*>(ctx.rbp),
+                static_cast<unsigned>(current_value),
+                static_cast<int>(adjusted_delta),
+                reinterpret_cast<void*>(ctx.rip));
+        }
+
+        if (TryAdjustDurabilityDelta(ctx.rbp, current_value, &adjusted_delta)) {
+            ctx.r13 = (ctx.r13 & ~static_cast<uintptr_t>(0xFFFFu)) |
+                      static_cast<uintptr_t>(static_cast<uint16_t>(adjusted_delta));
+            if (log_sample) {
+                Log("hooks: durability-delta adjusted entry=0x%p final_delta=%d",
+                    reinterpret_cast<void*>(ctx.rbp),
+                    static_cast<int>(adjusted_delta));
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_reported_durability_delta_exception.exchange(true, std::memory_order_acq_rel)) {
+            Log("hooks: exception 0x%08lX inside durability-delta hook", GetExceptionCode());
         }
     }
 }
@@ -252,8 +339,7 @@ bool InstallStatWriteHook() {
     return true;
 }
 
-bool InstallDamageHook() {
-    const uintptr_t target = ScanForDamageValueAccess();
+bool InstallDamageHook(const uintptr_t target) {
     if (target == 0) {
         return false;
     }
@@ -266,6 +352,22 @@ bool InstallDamageHook() {
 
     g_damage_hook = std::move(*hook_result);
     Log("hooks: installed damage hook at 0x%p", reinterpret_cast<void*>(target));
+    return true;
+}
+
+bool InstallDamageSlotHook(const uintptr_t target) {
+    if (target == 0) {
+        return false;
+    }
+
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), DamageSlotCallback);
+    if (!hook_result.has_value()) {
+        Log("hooks: failed to create damage-slot mid hook");
+        return false;
+    }
+
+    g_damage_slot_hook = std::move(*hook_result);
+    Log("hooks: installed damage-slot hook at 0x%p", reinterpret_cast<void*>(target));
     return true;
 }
 
@@ -283,6 +385,40 @@ bool InstallItemGainHook() {
 
     g_item_gain_hook = std::move(*hook_result);
     Log("hooks: installed item-gain hook at 0x%p", reinterpret_cast<void*>(target));
+    return true;
+}
+
+bool InstallDurabilityHook() {
+    const uintptr_t target = ScanForDurabilityWriteAccess();
+    if (target == 0) {
+        return false;
+    }
+
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), DurabilityCallback);
+    if (!hook_result.has_value()) {
+        Log("hooks: failed to create durability mid hook");
+        return false;
+    }
+
+    g_durability_hook = std::move(*hook_result);
+    Log("hooks: installed durability hook at 0x%p", reinterpret_cast<void*>(target));
+    return true;
+}
+
+bool InstallDurabilityDeltaHook() {
+    const uintptr_t target = ScanForDurabilityDeltaAccess();
+    if (target == 0) {
+        return false;
+    }
+
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), DurabilityDeltaCallback);
+    if (!hook_result.has_value()) {
+        Log("hooks: failed to create durability-delta mid hook");
+        return false;
+    }
+
+    g_durability_delta_hook = std::move(*hook_result);
+    Log("hooks: installed durability-delta hook at 0x%p", reinterpret_cast<void*>(target));
     return true;
 }
 
@@ -307,7 +443,8 @@ bool InstallPositionHeightHook() {
 
 bool InstallHooks() {
     std::lock_guard lock(g_hook_mutex);
-    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_hook && g_item_gain_hook) {
+    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_slot_hook && g_damage_hook &&
+        g_item_gain_hook && g_durability_hook && g_durability_delta_hook) {
         return true;
     }
 
@@ -326,7 +463,24 @@ bool InstallHooks() {
         return false;
     }
 
-    if (!InstallDamageHook()) {
+    const uintptr_t damage_slot_target = ScanForDamageSlotAccess();
+    const uintptr_t damage_value_target = ScanForDamageValueAccess();
+    if (damage_slot_target == 0 || damage_value_target == 0) {
+        g_stat_write_hook.reset();
+        g_stats_hook.reset();
+        g_player_pointer_hook.reset();
+        return false;
+    }
+
+    if (!InstallDamageSlotHook(damage_slot_target)) {
+        g_stat_write_hook.reset();
+        g_stats_hook.reset();
+        g_player_pointer_hook.reset();
+        return false;
+    }
+
+    if (!InstallDamageHook(damage_value_target)) {
+        g_damage_slot_hook.reset();
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -335,6 +489,28 @@ bool InstallHooks() {
 
     if (!InstallItemGainHook()) {
         g_damage_hook.reset();
+        g_damage_slot_hook.reset();
+        g_stat_write_hook.reset();
+        g_stats_hook.reset();
+        g_player_pointer_hook.reset();
+        return false;
+    }
+
+    if (!InstallDurabilityHook()) {
+        g_item_gain_hook.reset();
+        g_damage_hook.reset();
+        g_damage_slot_hook.reset();
+        g_stat_write_hook.reset();
+        g_stats_hook.reset();
+        g_player_pointer_hook.reset();
+        return false;
+    }
+
+    if (!InstallDurabilityDeltaHook()) {
+        g_durability_hook.reset();
+        g_item_gain_hook.reset();
+        g_damage_hook.reset();
+        g_damage_slot_hook.reset();
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -361,6 +537,16 @@ void RemoveHooks() {
         Log("hooks: removed item-gain hook");
     }
 
+    if (g_durability_delta_hook) {
+        g_durability_delta_hook.reset();
+        Log("hooks: removed durability-delta hook");
+    }
+
+    if (g_durability_hook) {
+        g_durability_hook.reset();
+        Log("hooks: removed durability hook");
+    }
+
     if (g_position_height_hook) {
         g_position_height_hook.reset();
         Log("hooks: removed position-height hook");
@@ -369,6 +555,11 @@ void RemoveHooks() {
     if (g_damage_hook) {
         g_damage_hook.reset();
         Log("hooks: removed damage hook");
+    }
+
+    if (g_damage_slot_hook) {
+        g_damage_slot_hook.reset();
+        Log("hooks: removed damage-slot hook");
     }
 
     if (g_stat_write_hook) {

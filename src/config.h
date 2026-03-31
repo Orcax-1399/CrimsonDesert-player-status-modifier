@@ -23,6 +23,12 @@ struct ItemConfig {
     bool operator==(const ItemConfig&) const = default;
 };
 
+struct DurabilityConfig {
+    double consumption_chance = 100.0;
+
+    bool operator==(const DurabilityConfig&) const = default;
+};
+
 struct PositionControlConfig {
     bool enabled = false;
     int key = VK_F6;
@@ -48,6 +54,7 @@ struct ModConfig {
     GeneralConfig general;
     DamageConfig damage;
     ItemConfig items;
+    DurabilityConfig durability;
     PositionControlConfig position_control;
     StatConfig health{0.5, 2.0};
     StatConfig stamina{0.5, 1.0};

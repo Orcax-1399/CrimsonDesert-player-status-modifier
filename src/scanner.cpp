@@ -313,6 +313,25 @@ uintptr_t ScanForPositionHeightAccess() {
     return outcome.address;
 }
 
+uintptr_t ScanForDamageSlotAccess() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {"primary", "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3", 4},
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: damage found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: damage found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
 uintptr_t ScanForDamageValueAccess() {
     static constexpr PatternDefinition kPatterns[] = {
         {"primary", "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3", 17},
@@ -347,6 +366,62 @@ uintptr_t ScanForItemGainAccess() {
 
     if (outcome.status != ScanStatus::Unique) {
         Log("scanner: item-gain found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
+uintptr_t ScanForDurabilityWriteAccess() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "66 3B CF 66 0F 4C F9 66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20",
+            7,
+        },
+        {
+            "fallback",
+            "66 89 7B 50 48 8B 5C 24 20 48 8B 03 33 D2 48 8B CB FF 50 20",
+            0,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: durability-write found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: durability-write found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
+uintptr_t ScanForDurabilityDeltaAccess() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "0F B7 C7 66 41 03 C5 66 89 45 38 79 0B 33 C0 66 89 45 38 0F B7 C8",
+            3,
+        },
+        {
+            "fallback",
+            "66 41 03 C5 66 89 45 38 79 0B 33 C0 66 89 45 38",
+            0,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: durability-delta found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: durability-delta found 0 matches");
         return 0;
     }
 

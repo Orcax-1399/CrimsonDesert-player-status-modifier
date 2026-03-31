@@ -20,18 +20,43 @@ DWORD ReadDword(const wchar_t* section, const wchar_t* key, const DWORD default_
     return static_cast<DWORD>(GetPrivateProfileIntW(section, key, static_cast<int>(default_value), path.c_str()));
 }
 
-double ReadDouble(const wchar_t* section, const wchar_t* key, const double default_value, const std::wstring& path) {
+double ReadDoubleRaw(const wchar_t* section, const wchar_t* key, const double default_value, const std::wstring& path) {
     wchar_t buffer[64]{};
     const auto default_text = std::to_wstring(default_value);
     GetPrivateProfileStringW(section, key, default_text.c_str(), buffer, static_cast<DWORD>(sizeof(buffer) / sizeof(buffer[0])), path.c_str());
 
     wchar_t* end = nullptr;
     const double parsed = std::wcstod(buffer, &end);
-    if (end == buffer || !std::isfinite(parsed) || parsed < 0.0) {
+    if (end == buffer || !std::isfinite(parsed)) {
         return default_value;
     }
 
     return parsed;
+}
+
+double ReadDouble(const wchar_t* section, const wchar_t* key, const double default_value, const std::wstring& path) {
+    const double parsed = ReadDoubleRaw(section, key, default_value, path);
+    if (parsed < 0.0) {
+        return default_value;
+    }
+
+    return parsed;
+}
+
+double ClampDouble(const double value, const double minimum, const double maximum, const double fallback) {
+    if (!std::isfinite(value)) {
+        return fallback;
+    }
+
+    if (value < minimum) {
+        return minimum;
+    }
+
+    if (value > maximum) {
+        return maximum;
+    }
+
+    return value;
 }
 
 void SanitizeConfig(ModConfig* const next) {
@@ -62,6 +87,9 @@ void SanitizeConfig(ModConfig* const next) {
     if (!std::isfinite(next->position_control.horizontal_multiplier) || next->position_control.horizontal_multiplier < 0.0f) {
         next->position_control.horizontal_multiplier = 1.5f;
     }
+
+    next->durability.consumption_chance =
+        ClampDouble(next->durability.consumption_chance, 0.0, 100.0, 100.0);
 }
 
 }  // namespace
@@ -81,6 +109,8 @@ bool ReadConfigSnapshot(const std::wstring& config_path, ModConfig* const config
 
     next.damage.multiplier = ReadDouble(L"Damage", L"Multiplier", next.damage.multiplier, config_path);
     next.items.gain_multiplier = ReadDouble(L"Items", L"GainMultiplier", next.items.gain_multiplier, config_path);
+    next.durability.consumption_chance =
+        ReadDoubleRaw(L"Durability", L"ConsumptionChance", next.durability.consumption_chance, config_path);
     next.position_control.enabled =
         ReadBool(L"Position Control(Height)", L"Enable", next.position_control.enabled, config_path);
     next.position_control.key =

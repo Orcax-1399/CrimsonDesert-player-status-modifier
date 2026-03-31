@@ -13,6 +13,8 @@ Current runtime behavior is split across several hook paths:
 - source stat write interception
 - player damage scaling
 - item gain scaling
+- equipment maintenance consumption control
+- weapon durability consumption control
 - optional position height control
 - optional position horizontal movement scaling
 - automatic config hot reload
@@ -31,6 +33,7 @@ The mod currently supports the following configurable features through `player-s
 - Spirit heal multiplier
 - Player damage multiplier
 - Item gain multiplier
+- Equipment maintenance / durability consumption chance
 - Position height control
 - Position horizontal movement scaling
 
@@ -60,6 +63,9 @@ Multiplier=2.0
 [Items]
 GainMultiplier=2.0
 
+[Durability]
+ConsumptionChance=100.0
+
 [Position Control(Height)]
 Enable=0
 Key=117
@@ -82,6 +88,13 @@ HealMultiplier=1.0
 ConsumptionMultiplier=0.5
 HealMultiplier=2.0
 ```
+
+Durability fields:
+
+- `ConsumptionChance` is clamped to `0..100`
+- `100` means maintenance and durability always consume normally
+- `0` means maintenance and durability never consume
+- values between `0` and `100` apply a per-write chance gate to both maintenance and durability loss paths
 
 Position height control fields:
 
