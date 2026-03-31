@@ -8,6 +8,7 @@ struct PlayerPointerCaptureTarget {
 
 uintptr_t ScanForDamageSlotAccess();
 uintptr_t ScanForDamageValueAccess();
+uintptr_t ScanForAbyssDurabilityDeltaAccess();
 uintptr_t ScanForDurabilityDeltaAccess();
 uintptr_t ScanForDurabilityWriteAccess();
 uintptr_t ScanForItemGainAccess();

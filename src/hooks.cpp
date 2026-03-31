@@ -28,6 +28,7 @@ SafetyHookMid g_damage_hook{};
 SafetyHookMid g_item_gain_hook{};
 SafetyHookMid g_durability_hook{};
 SafetyHookMid g_durability_delta_hook{};
+SafetyHookMid g_abyss_durability_delta_hook{};
 SafetyHookMid g_position_height_hook{};
 std::atomic<bool> g_reported_stats_exception{false};
 std::atomic<bool> g_reported_stat_write_exception{false};
@@ -35,6 +36,7 @@ std::atomic<bool> g_reported_damage_exception{false};
 std::atomic<bool> g_reported_item_gain_exception{false};
 std::atomic<bool> g_reported_durability_exception{false};
 std::atomic<bool> g_reported_durability_delta_exception{false};
+std::atomic<bool> g_reported_abyss_durability_delta_exception{false};
 std::atomic<std::uint32_t> g_player_pointer_samples{0};
 std::atomic<std::uint32_t> g_stats_samples{0};
 std::atomic<std::uint32_t> g_stat_write_samples{0};
@@ -42,6 +44,7 @@ std::atomic<std::uint32_t> g_damage_samples{0};
 std::atomic<std::uint32_t> g_item_gain_samples{0};
 std::atomic<std::uint32_t> g_durability_samples{0};
 std::atomic<std::uint32_t> g_durability_delta_samples{0};
+std::atomic<std::uint32_t> g_abyss_durability_delta_samples{0};
 thread_local int32_t g_pending_damage_slot = -1;
 thread_local bool g_has_pending_damage_slot = false;
 
@@ -261,6 +264,40 @@ void DurabilityDeltaCallback(SafetyHookContext& ctx) {
     }
 }
 
+void AbyssDurabilityDeltaCallback(SafetyHookContext& ctx) {
+    if (ctx.rbx < kMinimumPointerAddress) {
+        return;
+    }
+
+    const bool log_sample = ShouldLogSample(g_abyss_durability_delta_samples, 16);
+    __try {
+        const uint16_t current_value = static_cast<uint16_t>(ctx.rsi & 0xFFFFu);
+        int16_t adjusted_delta = static_cast<int16_t>(ctx.r13 & 0xFFFFu);
+
+        if (log_sample) {
+            Log("hooks: abyss-durability-delta callback entry=0x%p current=%u delta=%d rip=0x%p",
+                reinterpret_cast<void*>(ctx.rbx),
+                static_cast<unsigned>(current_value),
+                static_cast<int>(adjusted_delta),
+                reinterpret_cast<void*>(ctx.rip));
+        }
+
+        if (TryAdjustDurabilityDelta(ctx.rbx, current_value, &adjusted_delta)) {
+            ctx.r13 = (ctx.r13 & ~static_cast<uintptr_t>(0xFFFFu)) |
+                      static_cast<uintptr_t>(static_cast<uint16_t>(adjusted_delta));
+            if (log_sample) {
+                Log("hooks: abyss-durability-delta adjusted entry=0x%p final_delta=%d",
+                    reinterpret_cast<void*>(ctx.rbx),
+                    static_cast<int>(adjusted_delta));
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!g_reported_abyss_durability_delta_exception.exchange(true, std::memory_order_acq_rel)) {
+            Log("hooks: exception 0x%08lX inside abyss-durability-delta hook", GetExceptionCode());
+        }
+    }
+}
+
 void PositionHeightCallback(SafetyHookContext& ctx) {
     if (ctx.r13 < kMinimumPointerAddress) {
         return;
@@ -422,6 +459,23 @@ bool InstallDurabilityDeltaHook() {
     return true;
 }
 
+bool InstallAbyssDurabilityDeltaHook() {
+    const uintptr_t target = ScanForAbyssDurabilityDeltaAccess();
+    if (target == 0) {
+        return false;
+    }
+
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), AbyssDurabilityDeltaCallback);
+    if (!hook_result.has_value()) {
+        Log("hooks: failed to create abyss-durability-delta mid hook");
+        return false;
+    }
+
+    g_abyss_durability_delta_hook = std::move(*hook_result);
+    Log("hooks: installed abyss-durability-delta hook at 0x%p", reinterpret_cast<void*>(target));
+    return true;
+}
+
 bool InstallPositionHeightHook() {
     const uintptr_t target = ScanForPositionHeightAccess();
     if (target == 0) {
@@ -444,7 +498,7 @@ bool InstallPositionHeightHook() {
 bool InstallHooks() {
     std::lock_guard lock(g_hook_mutex);
     if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_slot_hook && g_damage_hook &&
-        g_item_gain_hook && g_durability_hook && g_durability_delta_hook) {
+        g_item_gain_hook && g_durability_hook && g_durability_delta_hook && g_abyss_durability_delta_hook) {
         return true;
     }
 
@@ -517,6 +571,18 @@ bool InstallHooks() {
         return false;
     }
 
+    if (!InstallAbyssDurabilityDeltaHook()) {
+        g_durability_delta_hook.reset();
+        g_durability_hook.reset();
+        g_item_gain_hook.reset();
+        g_damage_hook.reset();
+        g_damage_slot_hook.reset();
+        g_stat_write_hook.reset();
+        g_stats_hook.reset();
+        g_player_pointer_hook.reset();
+        return false;
+    }
+
     if (!g_position_height_hook && !InstallPositionHeightHook()) {
         Log("hooks: position-height hook unavailable; continuing without position control");
     }
@@ -535,6 +601,11 @@ void RemoveHooks() {
     if (g_item_gain_hook) {
         g_item_gain_hook.reset();
         Log("hooks: removed item-gain hook");
+    }
+
+    if (g_abyss_durability_delta_hook) {
+        g_abyss_durability_delta_hook.reset();
+        Log("hooks: removed abyss-durability-delta hook");
     }
 
     if (g_durability_delta_hook) {

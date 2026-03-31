@@ -428,6 +428,34 @@ uintptr_t ScanForDurabilityDeltaAccess() {
     return outcome.address;
 }
 
+uintptr_t ScanForAbyssDurabilityDeltaAccess() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "0F B7 73 02 48 8B CB 66 41 3B F5 42 8D 04 2E 66 0F 4D F8 66 89 7B 02 E8",
+            11,
+        },
+        {
+            "fallback",
+            "66 41 3B F5 42 8D 04 2E 66 0F 4D F8 66 89 7B 02",
+            4,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: abyss-durability-delta found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: abyss-durability-delta found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
 uintptr_t ScanForStatsAccess() {
     static constexpr PatternDefinition kPatterns[] = {
         {"primary", "48 8D ?? ?? 48 C1 E0 04 48 03 46 58 ?? 8B ?? 24", 12},
