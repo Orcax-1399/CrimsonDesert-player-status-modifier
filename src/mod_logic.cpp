@@ -18,10 +18,13 @@ constexpr int32_t kHealthId = 0;
 constexpr int32_t kStaminaId = 17;
 constexpr int32_t kSpiritId = 18;
 constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
+constexpr uintptr_t kStaminaEntryOffsetFromHealth = 0x480;
+constexpr uintptr_t kSpiritEntryOffsetFromHealth = 0x510;
 
 std::mutex g_state_mutex;
 uintptr_t g_player_actor = 0;
 std::atomic<uintptr_t> g_player_status_marker{0};
+std::atomic<uintptr_t> g_player_stat_root{0};
 std::atomic<uintptr_t> g_health_entry{0};
 std::atomic<uintptr_t> g_stamina_entry{0};
 std::atomic<uintptr_t> g_spirit_entry{0};
@@ -85,6 +88,50 @@ bool IsTrackedStat(const int32_t stat_type) {
     return stat_type == kHealthId || stat_type == kStaminaId || stat_type == kSpiritId;
 }
 
+bool TryResolveEntryFromHealthLayout(const uintptr_t entry, int32_t* const stat_type) {
+    if (stat_type == nullptr) {
+        return false;
+    }
+
+    const uintptr_t health_entry = g_health_entry.load(std::memory_order_acquire);
+    if (health_entry < kMinimumPointerAddress) {
+        return false;
+    }
+
+    if (entry == health_entry + kStaminaEntryOffsetFromHealth) {
+        g_stamina_entry.store(entry, std::memory_order_release);
+        *stat_type = kStaminaId;
+        return true;
+    }
+
+    if (entry == health_entry + kSpiritEntryOffsetFromHealth) {
+        g_spirit_entry.store(entry, std::memory_order_release);
+        *stat_type = kSpiritId;
+        return true;
+    }
+
+    return false;
+}
+
+uintptr_t TryResolveHealthEntryFromTrackedRoot() {
+    const uintptr_t stat_root = g_player_stat_root.load(std::memory_order_acquire);
+    if (stat_root < kMinimumPointerAddress) {
+        return 0;
+    }
+
+    const uintptr_t health_entry = *reinterpret_cast<const uintptr_t*>(stat_root + 0x58);
+    if (health_entry < kMinimumPointerAddress) {
+        return 0;
+    }
+
+    if (*reinterpret_cast<const int32_t*>(health_entry) != kHealthId) {
+        return 0;
+    }
+
+    g_health_entry.store(health_entry, std::memory_order_release);
+    return health_entry;
+}
+
 void ResetTrackedEntriesLocked() {
     g_health_entry.store(0, std::memory_order_release);
     g_stamina_entry.store(0, std::memory_order_release);
@@ -133,6 +180,7 @@ void ResetRuntimeState() {
     std::lock_guard lock(g_state_mutex);
     g_player_actor = 0;
     g_player_status_marker.store(0, std::memory_order_release);
+    g_player_stat_root.store(0, std::memory_order_release);
     ResetTrackedEntriesLocked();
     g_runtime_enabled.store(true, std::memory_order_release);
 }
@@ -220,13 +268,21 @@ void UpdateTrackedPlayerStatusComponent(const uintptr_t actor, const uintptr_t c
         return;
     }
 
+    const uintptr_t stat_root = *reinterpret_cast<const uintptr_t*>(component + 0x18);
+
     g_player_actor = actor;
     g_player_status_marker.store(component, std::memory_order_release);
+    g_player_stat_root.store(stat_root, std::memory_order_release);
     ResetTrackedEntriesLocked();
 
-    Log("runtime: tracked player actor=0x%p status_marker=0x%p",
+    Log("runtime: tracked player actor=0x%p status_marker=0x%p stat_root=0x%p",
         reinterpret_cast<void*>(actor),
-        reinterpret_cast<void*>(component));
+        reinterpret_cast<void*>(component),
+        reinterpret_cast<void*>(stat_root));
+}
+
+uintptr_t GetTrackedPlayerStatRoot() {
+    return g_player_stat_root.load(std::memory_order_acquire);
 }
 
 void ObserveStatEntry(const uintptr_t entry, const uintptr_t component) {
@@ -242,14 +298,6 @@ void ObserveStatEntry(const uintptr_t entry, const uintptr_t component) {
     const auto tracked_marker = g_player_status_marker.load(std::memory_order_acquire);
     const auto component_marker = *reinterpret_cast<const uintptr_t*>(component);
     if (component_marker != tracked_marker) {
-        const auto current = g_process_skip_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: stats marker mismatch tracked=0x%p actual=0x%p component=0x%p entry=0x%p",
-                reinterpret_cast<void*>(tracked_marker),
-                reinterpret_cast<void*>(component_marker),
-                reinterpret_cast<void*>(component),
-                reinterpret_cast<void*>(entry));
-        }
         return;
     }
 
@@ -293,7 +341,7 @@ void ObserveStatEntry(const uintptr_t entry, const uintptr_t component) {
     }
 }
 
-bool TryAdjustStatWrite(const uintptr_t entry, int64_t* const value) {
+bool TryAdjustStatWrite(const uintptr_t entry, const bool player_context, int64_t* const value) {
     if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
         return false;
     }
@@ -304,7 +352,11 @@ bool TryAdjustStatWrite(const uintptr_t entry, int64_t* const value) {
     }
 
     int32_t stat_type = -1;
-    const uintptr_t health_entry = g_health_entry.load(std::memory_order_acquire);
+    uintptr_t health_entry = g_health_entry.load(std::memory_order_acquire);
+    if (health_entry < kMinimumPointerAddress) {
+        health_entry = TryResolveHealthEntryFromTrackedRoot();
+    }
+
     const uintptr_t stamina_entry = g_stamina_entry.load(std::memory_order_acquire);
     const uintptr_t spirit_entry = g_spirit_entry.load(std::memory_order_acquire);
     if (entry == health_entry) {
@@ -313,6 +365,30 @@ bool TryAdjustStatWrite(const uintptr_t entry, int64_t* const value) {
         stat_type = kStaminaId;
     } else if (entry == spirit_entry) {
         stat_type = kSpiritId;
+    } else if (player_context) {
+        const int32_t inferred_type = *reinterpret_cast<const int32_t*>(entry);
+        if (IsTrackedStat(inferred_type)) {
+            stat_type = inferred_type;
+
+            if (auto* const entry_slot = SelectEntrySlot(stat_type); entry_slot != nullptr) {
+                entry_slot->store(entry, std::memory_order_release);
+            }
+
+            const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
+            if (current < 24) {
+                Log("runtime: inferred stat entry from write context type=%d entry=0x%p",
+                    stat_type,
+                    reinterpret_cast<void*>(entry));
+            }
+        }
+    } else if (TryResolveEntryFromHealthLayout(entry, &stat_type)) {
+        const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
+        if (current < 24) {
+            Log("runtime: inferred stat entry from health layout type=%d entry=0x%p health=0x%p",
+                stat_type,
+                reinterpret_cast<void*>(entry),
+                reinterpret_cast<void*>(health_entry));
+        }
     } else {
         const auto current = g_process_skip_logs.fetch_add(1, std::memory_order_acq_rel);
         if (current < 24) {

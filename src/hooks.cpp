@@ -103,10 +103,18 @@ void StatsCallback(SafetyHookContext& ctx) {
 
 void StatWriteCallback(SafetyHookContext& ctx) {
     const bool log_sample = ShouldLogSample(g_stat_write_samples, 24);
+    const uintptr_t tracked_root = GetTrackedPlayerStatRoot();
+    const bool player_context =
+        tracked_root >= kMinimumPointerAddress &&
+        (ctx.r14 == tracked_root || ctx.r15 == tracked_root);
     if (log_sample) {
-        Log("hooks: stat-write callback entry=0x%p rbx=%lld rip=0x%p",
+        Log("hooks: stat-write callback entry=0x%p rbx=%lld r14=0x%p r15=0x%p tracked_root=0x%p player_context=%d rip=0x%p",
             reinterpret_cast<void*>(ctx.rdi),
             static_cast<long long>(ctx.rbx),
+            reinterpret_cast<void*>(ctx.r14),
+            reinterpret_cast<void*>(ctx.r15),
+            reinterpret_cast<void*>(tracked_root),
+            player_context ? 1 : 0,
             reinterpret_cast<void*>(ctx.rip));
     }
 
@@ -116,7 +124,7 @@ void StatWriteCallback(SafetyHookContext& ctx) {
 
     __try {
         int64_t adjusted_value = static_cast<int64_t>(ctx.rbx);
-        if (TryAdjustStatWrite(ctx.rdi, &adjusted_value)) {
+        if (TryAdjustStatWrite(ctx.rdi, player_context, &adjusted_value)) {
             ctx.rbx = static_cast<uintptr_t>(adjusted_value);
             if (log_sample) {
                 Log("hooks: stat-write adjusted entry=0x%p final=%lld",
