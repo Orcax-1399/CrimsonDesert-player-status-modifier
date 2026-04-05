@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <cstdint>
 #include <string>
 
 struct StatConfig {
@@ -11,8 +12,16 @@ struct StatConfig {
     bool operator==(const StatConfig&) const = default;
 };
 
+struct DamageChannelConfig {
+    bool enabled = false;
+    double multiplier = 1.0;
+
+    bool operator==(const DamageChannelConfig&) const = default;
+};
+
 struct DamageConfig {
-    double multiplier = 2.0;
+    DamageChannelConfig outgoing{true, 2.0};
+    DamageChannelConfig incoming{false, 1.0};
 
     bool operator==(const DamageConfig&) const = default;
 };
@@ -40,6 +49,15 @@ struct PositionControlConfig {
     bool operator==(const PositionControlConfig&) const = default;
 };
 
+struct MountConfig {
+    bool enabled = false;
+    bool lock_health = true;
+    bool lock_stamina = true;
+    int64_t lock_value = 9999999;
+
+    bool operator==(const MountConfig&) const = default;
+};
+
 struct GeneralConfig {
     bool enabled = true;
     bool log_enabled = true;
@@ -55,6 +73,7 @@ struct ModConfig {
     DamageConfig damage;
     ItemConfig items;
     DurabilityConfig durability;
+    MountConfig mount;
     PositionControlConfig position_control;
     StatConfig health{0.5, 2.0};
     StatConfig stamina{0.5, 1.0};

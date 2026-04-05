@@ -285,6 +285,29 @@ PlayerPointerCaptureTarget ScanForPlayerPointerCapture() {
     return {outcome.address};
 }
 
+MountPointerCaptureTarget ScanForMountPointerCapture() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "48 8B C7 49 8B 7D 08 80 BF 94 00 00 00 00 0F 85 ?? ?? ?? ?? 48 8B 47 68 48 8B 48 20 48 83 C1 30 E8 ?? ?? ?? ?? 66 83 B8 E4 00 00 00 00",
+            20,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: mount-pointer found multiple matches, install failed");
+        return {};
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: mount-pointer found 0 matches");
+        return {};
+    }
+
+    return {outcome.address};
+}
+
 uintptr_t ScanForPositionHeightAccess() {
     static constexpr PatternDefinition kPatterns[] = {
         {
@@ -313,38 +336,28 @@ uintptr_t ScanForPositionHeightAccess() {
     return outcome.address;
 }
 
-uintptr_t ScanForDamageSlotAccess() {
+uintptr_t ScanForDamageBattleAccess() {
     static constexpr PatternDefinition kPatterns[] = {
-        {"primary", "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3", 4},
+        {
+            "primary",
+            "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 49 8B C1 49 8B E8 0F B7 DA 48 8B F1 4D 85 C9",
+            0,
+        },
+        {
+            "fallback",
+            "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 49 8B C1 49 8B E8 0F B7 DA 48 8B F1 4D 85 C9 0F 84 ?? ?? ?? ??",
+            0,
+        },
     };
 
     const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
     if (outcome.status == ScanStatus::Ambiguous) {
-        Log("scanner: damage found multiple matches, install failed");
+        Log("scanner: damage-battle found multiple matches, install failed");
         return 0;
     }
 
     if (outcome.status != ScanStatus::Unique) {
-        Log("scanner: damage found 0 matches");
-        return 0;
-    }
-
-    return outcome.address;
-}
-
-uintptr_t ScanForDamageValueAccess() {
-    static constexpr PatternDefinition kPatterns[] = {
-        {"primary", "49 8B 77 38 44 8B 24 88 48 8D 4C 24 ?? 4A 8B 1C E3", 17},
-    };
-
-    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
-    if (outcome.status == ScanStatus::Ambiguous) {
-        Log("scanner: damage found multiple matches, install failed");
-        return 0;
-    }
-
-    if (outcome.status != ScanStatus::Unique) {
-        Log("scanner: damage found 0 matches");
+        Log("scanner: damage-battle found 0 matches");
         return 0;
     }
 

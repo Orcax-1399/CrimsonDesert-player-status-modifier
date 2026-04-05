@@ -21,9 +21,9 @@ constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
 
 std::mutex g_hook_mutex;
 SafetyHookMid g_player_pointer_hook{};
+SafetyHookMid g_mount_pointer_hook{};
 SafetyHookMid g_stats_hook{};
 SafetyHookMid g_stat_write_hook{};
-SafetyHookMid g_damage_slot_hook{};
 SafetyHookMid g_damage_hook{};
 SafetyHookMid g_item_gain_hook{};
 SafetyHookMid g_durability_hook{};
@@ -38,6 +38,7 @@ std::atomic<bool> g_reported_durability_exception{false};
 std::atomic<bool> g_reported_durability_delta_exception{false};
 std::atomic<bool> g_reported_abyss_durability_delta_exception{false};
 std::atomic<std::uint32_t> g_player_pointer_samples{0};
+std::atomic<std::uint32_t> g_mount_pointer_samples{0};
 std::atomic<std::uint32_t> g_stats_samples{0};
 std::atomic<std::uint32_t> g_stat_write_samples{0};
 std::atomic<std::uint32_t> g_damage_samples{0};
@@ -45,9 +46,6 @@ std::atomic<std::uint32_t> g_item_gain_samples{0};
 std::atomic<std::uint32_t> g_durability_samples{0};
 std::atomic<std::uint32_t> g_durability_delta_samples{0};
 std::atomic<std::uint32_t> g_abyss_durability_delta_samples{0};
-thread_local int32_t g_pending_damage_slot = -1;
-thread_local bool g_has_pending_damage_slot = false;
-
 bool ShouldLogSample(std::atomic<std::uint32_t>& counter, const std::uint32_t limit) {
     const auto current = counter.fetch_add(1, std::memory_order_acq_rel);
     return current < limit;
@@ -56,8 +54,18 @@ bool ShouldLogSample(std::atomic<std::uint32_t>& counter, const std::uint32_t li
 void PlayerPointerCallback(SafetyHookContext& ctx) {
     const uintptr_t actor = ctx.rax;
     const uintptr_t status_marker = ctx.rsi;
-    const bool log_sample = ShouldLogSample(g_player_pointer_samples, 16);
-    if (log_sample) {
+    if (actor < kMinimumPointerAddress || status_marker < kMinimumPointerAddress) {
+        if (ShouldLogSample(g_player_pointer_samples, 8)) {
+            Log("hooks: player-pointer skipped, actor/marker below threshold rax=0x%p rsi=0x%p",
+                reinterpret_cast<void*>(ctx.rax),
+                reinterpret_cast<void*>(ctx.rsi));
+        }
+        return;
+    }
+
+    const uintptr_t tracked_actor = GetTrackedPlayerActor();
+    const uintptr_t tracked_marker = GetTrackedPlayerStatusMarker();
+    if (tracked_actor != actor || tracked_marker != status_marker) {
         Log("hooks: player-pointer callback actor=0x%p marker=0x%p rax=0x%p rsi=0x%p rdx=0x%p",
             reinterpret_cast<void*>(actor),
             reinterpret_cast<void*>(status_marker),
@@ -66,14 +74,44 @@ void PlayerPointerCallback(SafetyHookContext& ctx) {
             reinterpret_cast<void*>(ctx.rdx));
     }
 
-    if (actor < kMinimumPointerAddress || status_marker < kMinimumPointerAddress) {
-        if (log_sample) {
-            Log("hooks: player-pointer skipped, actor/marker below threshold");
-        }
+    UpdateTrackedPlayerStatusComponent(actor, status_marker);
+}
+
+void MountPointerCallback(SafetyHookContext& ctx) {
+    const uintptr_t actor_object = ctx.rdi;
+    if (actor_object < kMinimumPointerAddress) {
         return;
     }
 
-    UpdateTrackedPlayerStatusComponent(actor, status_marker);
+    uintptr_t actor = 0;
+    uintptr_t marker = 0;
+    __try {
+        actor = *reinterpret_cast<const uintptr_t*>(actor_object + 0x68);
+        if (actor < kMinimumPointerAddress) {
+            return;
+        }
+
+        marker = *reinterpret_cast<const uintptr_t*>(actor + 0x20);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return;
+    }
+
+    if (marker < kMinimumPointerAddress) {
+        return;
+    }
+
+    const uintptr_t tracked_actor = GetTrackedMountActor();
+    const uintptr_t tracked_marker = GetTrackedMountStatusMarker();
+    if (tracked_actor != actor || tracked_marker != marker) {
+        Log("hooks: mount-pointer callback actor=0x%p marker=0x%p rdi=0x%p rax=0x%p rip=0x%p",
+            reinterpret_cast<void*>(actor),
+            reinterpret_cast<void*>(marker),
+            reinterpret_cast<void*>(ctx.rdi),
+            reinterpret_cast<void*>(ctx.rax),
+            reinterpret_cast<void*>(ctx.rip));
+    }
+
+    UpdateTrackedMountStatusComponent(actor, marker);
 }
 
 void StatsCallback(SafetyHookContext& ctx) {
@@ -102,8 +140,13 @@ void StatsCallback(SafetyHookContext& ctx) {
 }
 
 void StatWriteCallback(SafetyHookContext& ctx) {
-    const bool log_sample = ShouldLogSample(g_stat_write_samples, 24);
     const uintptr_t tracked_root = GetTrackedPlayerStatRoot();
+    const uintptr_t tracked_marker = GetTrackedPlayerStatusMarker();
+    if (tracked_root < kMinimumPointerAddress || tracked_marker < kMinimumPointerAddress) {
+        return;
+    }
+
+    const bool log_sample = ShouldLogSample(g_stat_write_samples, 24);
     const bool player_context =
         tracked_root >= kMinimumPointerAddress &&
         (ctx.r14 == tracked_root || ctx.r15 == tracked_root);
@@ -124,7 +167,7 @@ void StatWriteCallback(SafetyHookContext& ctx) {
 
     __try {
         int64_t adjusted_value = static_cast<int64_t>(ctx.rbx);
-        if (TryAdjustStatWrite(ctx.rdi, player_context, &adjusted_value)) {
+        if (TryAdjustStatWrite(ctx.rdi, player_context, ctx.r14, ctx.r15, &adjusted_value)) {
             ctx.rbx = static_cast<uintptr_t>(adjusted_value);
             if (log_sample) {
                 Log("hooks: stat-write adjusted entry=0x%p final=%lld",
@@ -142,45 +185,40 @@ void StatWriteCallback(SafetyHookContext& ctx) {
 }
 
 void DamageCallback(SafetyHookContext& ctx) {
-    int32_t slot = -1;
-    if (g_has_pending_damage_slot) {
-        slot = g_pending_damage_slot;
-        g_has_pending_damage_slot = false;
+    uintptr_t return_address = 0;
+    uintptr_t source_context = 0;
+    __try {
+        return_address = *reinterpret_cast<const uintptr_t*>(ctx.rsp);
+        source_context = *reinterpret_cast<const uintptr_t*>(ctx.rsp + 0x28);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return;
     }
 
-    const bool log_sample = ShouldLogSample(g_damage_samples, 16);
-    if (log_sample) {
-        Log("hooks: damage callback r15=0x%p slot=%d r12=%u rbx=0x%p rip=0x%p",
-            reinterpret_cast<void*>(ctx.r15),
-            static_cast<int>(slot),
-            static_cast<unsigned>(ctx.r12 & 0xFFFFFFFFu),
-            reinterpret_cast<void*>(ctx.rbx),
-            reinterpret_cast<void*>(ctx.rip));
-    }
-
-    if (ctx.r15 < kMinimumPointerAddress) {
+    if (ctx.rcx < kMinimumPointerAddress) {
         return;
     }
 
     __try {
-        uintptr_t adjusted_value = ctx.rbx;
-        if (TryScalePlayerDamage(ctx.r15, slot, &adjusted_value)) {
-            ctx.rbx = adjusted_value;
-            Log("hooks: damage scaled slot=%d source=0x%p final=0x%p",
-                static_cast<int>(slot),
-                reinterpret_cast<void*>(ctx.r15),
-                reinterpret_cast<void*>(ctx.rbx));
+        int64_t adjusted_delta = static_cast<int64_t>(ctx.r9);
+        if (TryScalePlayerDamage(ctx.rcx,
+                                 static_cast<int32_t>(ctx.rdx & 0xFFFFu),
+                                 return_address,
+                                 source_context,
+                                 &adjusted_delta)) {
+            ctx.r9 = static_cast<uintptr_t>(adjusted_delta);
+            if (ShouldLogSample(g_damage_samples, 24)) {
+                Log("hooks: damage scaled target=0x%p final=%lld sourceCtx=0x%p ret=0x%p",
+                    reinterpret_cast<void*>(ctx.rcx),
+                    static_cast<long long>(adjusted_delta),
+                    reinterpret_cast<void*>(source_context),
+                    reinterpret_cast<void*>(return_address));
+            }
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         if (!g_reported_damage_exception.exchange(true, std::memory_order_acq_rel)) {
             Log("hooks: exception 0x%08lX inside damage hook", GetExceptionCode());
         }
     }
-}
-
-void DamageSlotCallback(SafetyHookContext& ctx) {
-    g_pending_damage_slot = static_cast<int32_t>(ctx.rcx & 0xFFFFFFFFu);
-    g_has_pending_damage_slot = true;
 }
 
 void ItemGainCallback(SafetyHookContext& ctx) {
@@ -350,6 +388,23 @@ bool InstallPlayerPointerHook() {
     return true;
 }
 
+bool InstallMountPointerHook() {
+    const auto target = ScanForMountPointerCapture();
+    if (target.address == 0) {
+        return false;
+    }
+
+    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target.address), MountPointerCallback);
+    if (!hook_result.has_value()) {
+        Log("hooks: failed to create mount-pointer mid hook");
+        return false;
+    }
+
+    g_mount_pointer_hook = std::move(*hook_result);
+    Log("hooks: installed mount-pointer hook at 0x%p", reinterpret_cast<void*>(target.address));
+    return true;
+}
+
 bool InstallStatsHook() {
     const uintptr_t target = ScanForStatsAccess();
     if (target == 0) {
@@ -397,22 +452,6 @@ bool InstallDamageHook(const uintptr_t target) {
 
     g_damage_hook = std::move(*hook_result);
     Log("hooks: installed damage hook at 0x%p", reinterpret_cast<void*>(target));
-    return true;
-}
-
-bool InstallDamageSlotHook(const uintptr_t target) {
-    if (target == 0) {
-        return false;
-    }
-
-    auto hook_result = SafetyHookMid::create(reinterpret_cast<void*>(target), DamageSlotCallback);
-    if (!hook_result.has_value()) {
-        Log("hooks: failed to create damage-slot mid hook");
-        return false;
-    }
-
-    g_damage_slot_hook = std::move(*hook_result);
-    Log("hooks: installed damage-slot hook at 0x%p", reinterpret_cast<void*>(target));
     return true;
 }
 
@@ -505,7 +544,7 @@ bool InstallPositionHeightHook() {
 
 bool InstallHooks() {
     std::lock_guard lock(g_hook_mutex);
-    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_slot_hook && g_damage_hook &&
+    if (g_player_pointer_hook && g_stats_hook && g_stat_write_hook && g_damage_hook &&
         g_item_gain_hook && g_durability_hook && g_durability_delta_hook && g_abyss_durability_delta_hook) {
         return true;
     }
@@ -525,24 +564,15 @@ bool InstallHooks() {
         return false;
     }
 
-    const uintptr_t damage_slot_target = ScanForDamageSlotAccess();
-    const uintptr_t damage_value_target = ScanForDamageValueAccess();
-    if (damage_slot_target == 0 || damage_value_target == 0) {
+    const uintptr_t damage_target = ScanForDamageBattleAccess();
+    if (damage_target == 0) {
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
         return false;
     }
 
-    if (!InstallDamageSlotHook(damage_slot_target)) {
-        g_stat_write_hook.reset();
-        g_stats_hook.reset();
-        g_player_pointer_hook.reset();
-        return false;
-    }
-
-    if (!InstallDamageHook(damage_value_target)) {
-        g_damage_slot_hook.reset();
+    if (!InstallDamageHook(damage_target)) {
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -551,7 +581,6 @@ bool InstallHooks() {
 
     if (!InstallItemGainHook()) {
         g_damage_hook.reset();
-        g_damage_slot_hook.reset();
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -561,7 +590,6 @@ bool InstallHooks() {
     if (!InstallDurabilityHook()) {
         g_item_gain_hook.reset();
         g_damage_hook.reset();
-        g_damage_slot_hook.reset();
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -572,7 +600,6 @@ bool InstallHooks() {
         g_durability_hook.reset();
         g_item_gain_hook.reset();
         g_damage_hook.reset();
-        g_damage_slot_hook.reset();
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -584,7 +611,6 @@ bool InstallHooks() {
         g_durability_hook.reset();
         g_item_gain_hook.reset();
         g_damage_hook.reset();
-        g_damage_slot_hook.reset();
         g_stat_write_hook.reset();
         g_stats_hook.reset();
         g_player_pointer_hook.reset();
@@ -636,11 +662,6 @@ void RemoveHooks() {
         Log("hooks: removed damage hook");
     }
 
-    if (g_damage_slot_hook) {
-        g_damage_slot_hook.reset();
-        Log("hooks: removed damage-slot hook");
-    }
-
     if (g_stat_write_hook) {
         g_stat_write_hook.reset();
         Log("hooks: removed stat-write hook");
@@ -649,6 +670,11 @@ void RemoveHooks() {
     if (g_stats_hook) {
         g_stats_hook.reset();
         Log("hooks: removed stats hook");
+    }
+
+    if (g_mount_pointer_hook) {
+        g_mount_pointer_hook.reset();
+        Log("hooks: removed mount-pointer hook");
     }
 
     if (g_player_pointer_hook) {
