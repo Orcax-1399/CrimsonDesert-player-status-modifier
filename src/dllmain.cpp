@@ -41,10 +41,16 @@ DWORD WINAPI InitializeMod(LPVOID) {
 
     ResetRuntimeState();
 
-    if (!InstallHooks()) {
-        Log("dllmain: hook installation failed");
-        return 0;
-    }
+        if (!InstallHooks()) {
+            Log("dllmain: hook installation failed");
+            return 0;
+        }
+
+        if (!StartMountResolver()) {
+            Log("dllmain: mount resolver failed to start");
+            RemoveHooks();
+            return 0;
+        }
 
     ModConfig config = GetConfig();
     if ((config.position_control.enabled || config.position_control.horizontal_enabled) && !IsPositionHeightHookInstalled()) {
@@ -80,6 +86,7 @@ BOOL APIENTRY DllMain(HMODULE module, const DWORD reason, LPVOID) {
             CloseHandle(thread);
         }
     } else if (reason == DLL_PROCESS_DETACH) {
+        StopMountResolver();
         StopConfigWatcher();
         ShutdownPositionControl();
         RemoveHooks();
