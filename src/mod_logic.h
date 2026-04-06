@@ -1,14 +1,21 @@
 #pragma once
 
+#include "runtime/damage_logic.h"
+#include "runtime/durability_logic.h"
+#include "runtime/stat_logic.h"
+
 #include <cstdint>
 
 void ResetRuntimeState();
 void DisableRuntimeProcessing();
-void ObserveStatEntry(uintptr_t entry, uintptr_t component);
-bool TryScalePlayerDamage(uintptr_t source_component, int32_t slot, uintptr_t* value);
-bool TryAdjustStatWrite(uintptr_t entry, bool player_context, int64_t* value);
-bool TryAdjustDurabilityDelta(uintptr_t entry, uint16_t current_value, int16_t* delta);
-bool TryAdjustDurabilityWrite(uintptr_t entry, uint16_t* value);
+bool StartMountResolver();
+void StopMountResolver();
 bool TryScaleItemGain(int64_t amount, int64_t* value);
+void UpdateTrackedMountStatusComponent(uintptr_t actor, uintptr_t marker);
 void UpdateTrackedPlayerStatusComponent(uintptr_t actor, uintptr_t component);
+uintptr_t GetTrackedMountActor();
+uintptr_t GetTrackedMountStatRoot();
+uintptr_t GetTrackedMountStatusMarker();
 uintptr_t GetTrackedPlayerStatRoot();
+uintptr_t GetTrackedPlayerActor();
+uintptr_t GetTrackedPlayerStatusMarker();

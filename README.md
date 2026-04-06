@@ -31,9 +31,11 @@ The mod currently supports the following configurable features through `player-s
 - Stamina heal multiplier
 - Spirit consumption multiplier
 - Spirit heal multiplier
-- Player damage multiplier
+- Outgoing damage multiplier
+- Incoming damage multiplier
 - Item gain multiplier
 - Equipment maintenance / durability consumption chance
+- Mount health / stamina lock
 - Position height control
 - Position horizontal movement scaling
 
@@ -47,6 +49,12 @@ The mod also watches `player-status-modifier.ini` in the background and reloads 
 
 The repository now also includes `player-status-modifier.default.ini` as a clean baseline. Use it as a reference or restore point if your live config drifts too far during testing.
 
+Damage behavior:
+
+- `OutgoingDamage` scales negative health deltas caused by the player or the currently resolved mount / dragon actor
+- `IncomingDamage` scales negative health deltas applied back to the player's resolved target owner
+- legacy `[Damage] Multiplier=...` is still accepted as a fallback for `OutgoingDamage.Multiplier`
+
 Default config:
 
 ```ini
@@ -57,14 +65,25 @@ InitDelayMs=3000
 StaleComponentMs=60000
 RelockIdleMs=10000
 
-[Damage]
+[OutgoingDamage]
+Enabled=1
 Multiplier=2.0
+
+[IncomingDamage]
+Enabled=0
+Multiplier=1.0
 
 [Items]
 GainMultiplier=2.0
 
 [Durability]
 ConsumptionChance=100.0
+
+[Mount]
+Enabled=0
+LockHealth=1
+LockStamina=1
+LockValue=9999999
 
 [Position Control(Height)]
 Enable=0
@@ -95,6 +114,20 @@ Durability fields:
 - `100` means maintenance and durability always consume normally
 - `0` means maintenance and durability never consume
 - values between `0` and `100` apply a per-write chance gate to both maintenance and durability loss paths
+
+Damage fields:
+
+- `OutgoingDamage.Enable=1` enables outgoing player / mount / dragon damage scaling
+- `OutgoingDamage.Multiplier` scales outgoing negative health deltas
+- `IncomingDamage.Enable=1` enables incoming damage scaling against the resolved player target
+- `IncomingDamage.Multiplier` scales incoming negative health deltas; `1.0` means unchanged
+
+Mount fields:
+
+- `Enabled=1` enables mount stat locking after the async resolver validates the current mount / dragon marker
+- `LockHealth=1` locks the resolved mount health entry to `LockValue`
+- `LockStamina=1` locks the resolved mount stamina entry to `LockValue`
+- `LockValue` is clamped to the stat max during write interception
 
 Position height control fields:
 

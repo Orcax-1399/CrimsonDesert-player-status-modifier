@@ -2,191 +2,33 @@
 
 #include "config.h"
 #include "logger.h"
+#include "runtime/actor_resolve.h"
+#include "runtime/mount_resolver.h"
+#include "runtime/runtime_state.h"
 
-#include <Windows.h>
-
-#include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <mutex>
-
-namespace {
-
-constexpr int32_t kHealthId = 0;
-constexpr int32_t kStaminaId = 17;
-constexpr int32_t kSpiritId = 18;
-constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
-constexpr uintptr_t kStaminaEntryOffsetFromHealth = 0x480;
-constexpr uintptr_t kSpiritEntryOffsetFromHealth = 0x510;
-
-std::mutex g_state_mutex;
-uintptr_t g_player_actor = 0;
-std::atomic<uintptr_t> g_player_status_marker{0};
-std::atomic<uintptr_t> g_player_stat_root{0};
-std::atomic<uintptr_t> g_health_entry{0};
-std::atomic<uintptr_t> g_stamina_entry{0};
-std::atomic<uintptr_t> g_spirit_entry{0};
-std::atomic<bool> g_runtime_enabled{true};
-std::atomic<std::uint32_t> g_process_skip_logs{0};
-std::atomic<std::uint32_t> g_process_apply_logs{0};
-std::atomic<std::uint32_t> g_discovery_logs{0};
-std::atomic<std::uint32_t> g_durability_logs{0};
-
-bool SelectConfig(const ModConfig& config, const int32_t stat_type, StatConfig* const selected) {
-    if (selected == nullptr) {
-        return false;
-    }
-
-    switch (stat_type) {
-    case kHealthId:
-        *selected = config.health;
-        return true;
-    case kStaminaId:
-        *selected = config.stamina;
-        return true;
-    case kSpiritId:
-        *selected = config.spirit;
-        return true;
-    default:
-        return false;
-    }
-}
-
-std::atomic<uintptr_t>* SelectEntrySlot(const int32_t stat_type) {
-    switch (stat_type) {
-    case kHealthId:
-        return &g_health_entry;
-    case kStaminaId:
-        return &g_stamina_entry;
-    case kSpiritId:
-        return &g_spirit_entry;
-    default:
-        return nullptr;
-    }
-}
-
-int64_t ClampToRange(const int64_t value, const int64_t minimum, const int64_t maximum) {
-    return std::max(minimum, std::min(value, maximum));
-}
-
-int64_t ScaleDelta(const int64_t delta, const double multiplier) {
-    const double scaled = std::floor(static_cast<double>(delta) * multiplier);
-    if (scaled <= 0.0) {
-        return 0;
-    }
-
-    if (scaled >= static_cast<double>(std::numeric_limits<int64_t>::max())) {
-        return std::numeric_limits<int64_t>::max();
-    }
-
-    return static_cast<int64_t>(scaled);
-}
-
-bool IsTrackedStat(const int32_t stat_type) {
-    return stat_type == kHealthId || stat_type == kStaminaId || stat_type == kSpiritId;
-}
-
-bool TryResolveEntryFromHealthLayout(const uintptr_t entry, int32_t* const stat_type) {
-    if (stat_type == nullptr) {
-        return false;
-    }
-
-    const uintptr_t health_entry = g_health_entry.load(std::memory_order_acquire);
-    if (health_entry < kMinimumPointerAddress) {
-        return false;
-    }
-
-    if (entry == health_entry + kStaminaEntryOffsetFromHealth) {
-        g_stamina_entry.store(entry, std::memory_order_release);
-        *stat_type = kStaminaId;
-        return true;
-    }
-
-    if (entry == health_entry + kSpiritEntryOffsetFromHealth) {
-        g_spirit_entry.store(entry, std::memory_order_release);
-        *stat_type = kSpiritId;
-        return true;
-    }
-
-    return false;
-}
-
-uintptr_t TryResolveHealthEntryFromTrackedRoot() {
-    const uintptr_t stat_root = g_player_stat_root.load(std::memory_order_acquire);
-    if (stat_root < kMinimumPointerAddress) {
-        return 0;
-    }
-
-    const uintptr_t health_entry = *reinterpret_cast<const uintptr_t*>(stat_root + 0x58);
-    if (health_entry < kMinimumPointerAddress) {
-        return 0;
-    }
-
-    if (*reinterpret_cast<const int32_t*>(health_entry) != kHealthId) {
-        return 0;
-    }
-
-    g_health_entry.store(health_entry, std::memory_order_release);
-    return health_entry;
-}
-
-void ResetTrackedEntriesLocked() {
-    g_health_entry.store(0, std::memory_order_release);
-    g_stamina_entry.store(0, std::memory_order_release);
-    g_spirit_entry.store(0, std::memory_order_release);
-}
-
-std::uint64_t SeedDurabilityRng(const uintptr_t entry) {
-    LARGE_INTEGER counter{};
-    QueryPerformanceCounter(&counter);
-
-    return static_cast<std::uint64_t>(counter.QuadPart) ^ static_cast<std::uint64_t>(GetCurrentThreadId()) ^
-           static_cast<std::uint64_t>(GetTickCount64()) ^ static_cast<std::uint64_t>(entry);
-}
-
-std::uint32_t NextDurabilityRoll(const uintptr_t entry) {
-    thread_local std::uint64_t state = 0;
-    if (state == 0) {
-        state = SeedDurabilityRng(entry);
-        if (state == 0) {
-            state = 0x9E3779B97F4A7C15ull;
-        }
-    }
-
-    state ^= state << 13;
-    state ^= state >> 7;
-    state ^= state << 17;
-    return static_cast<std::uint32_t>(state % 10000ull);
-}
-
-bool ShouldSkipDurabilityConsumption(const uintptr_t entry, const double chance) {
-    if (chance <= 0.0) {
-        return true;
-    }
-
-    if (chance >= 100.0) {
-        return false;
-    }
-
-    const double roll = static_cast<double>(NextDurabilityRoll(entry)) / 100.0;
-    return roll >= chance;
-}
-
-}  // namespace
 
 void ResetRuntimeState() {
     std::lock_guard lock(g_state_mutex);
-    g_player_actor = 0;
-    g_player_status_marker.store(0, std::memory_order_release);
-    g_player_stat_root.store(0, std::memory_order_release);
+    g_player_resolve = {};
+    g_mount_resolve = {};
     ResetTrackedEntriesLocked();
+    ResetTrackedDamageParticipantsLocked();
     g_runtime_enabled.store(true, std::memory_order_release);
 }
 
 void DisableRuntimeProcessing() {
     g_runtime_enabled.store(false, std::memory_order_release);
+}
+
+bool StartMountResolver() {
+    return StartMountResolverLoop();
+}
+
+void StopMountResolver() {
+    StopMountResolverLoop();
 }
 
 bool TryScaleItemGain(const int64_t amount, int64_t* const value) {
@@ -214,43 +56,47 @@ bool TryScaleItemGain(const int64_t amount, int64_t* const value) {
     return *value != amount;
 }
 
-bool TryScalePlayerDamage(const uintptr_t source_component, const int32_t slot, uintptr_t* const value) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
-        return false;
+void UpdateTrackedMountStatusComponent(const uintptr_t actor, const uintptr_t marker) {
+    if (marker < kMinimumPointerAddress) {
+        return;
     }
 
-    const auto& config = GetConfig();
-    if (!config.general.enabled || config.damage.multiplier == 1.0) {
-        return false;
+    const uintptr_t player_marker = g_player_resolve.marker;
+    if (marker == player_marker) {
+        return;
     }
 
-    if (source_component < kMinimumPointerAddress || slot != 3) {
-        return false;
+    ActorResolveSnapshot resolved{};
+    if (!TryResolveActorResolveFromMarker(marker, &resolved, actor)) {
+        return;
     }
 
-    const auto tracked_marker = g_player_status_marker.load(std::memory_order_acquire);
-    if (tracked_marker < kMinimumPointerAddress) {
-        return false;
+    if (resolved.marker == g_player_resolve.marker || resolved.root == g_player_resolve.root) {
+        return;
     }
 
-    const auto source_marker = *reinterpret_cast<const uintptr_t*>(source_component);
-    if (source_marker != tracked_marker) {
-        return false;
+    const ActorResolveSnapshot current_mount = g_mount_resolve;
+    if (current_mount.actor == resolved.actor && current_mount.marker == resolved.marker) {
+        return;
     }
 
-    const double scaled = std::floor(static_cast<double>(*value) * config.damage.multiplier);
-    if (scaled < 0.0) {
-        *value = 0;
-        return true;
+    std::lock_guard lock(g_state_mutex);
+    if (g_mount_resolve.actor == resolved.actor && g_mount_resolve.marker == resolved.marker) {
+        return;
     }
 
-    if (scaled >= static_cast<double>(std::numeric_limits<uintptr_t>::max())) {
-        *value = std::numeric_limits<uintptr_t>::max();
-        return true;
-    }
+    g_mount_resolve = resolved;
 
-    *value = static_cast<uintptr_t>(scaled);
-    return true;
+    const auto current = g_actor_resolve_logs.fetch_add(1, std::memory_order_acq_rel);
+    if (current < 24) {
+        Log("runtime: tracked mount actor=0x%p root=0x%p status_marker=0x%p health=0x%p stamina=0x%p spirit=0x%p",
+            reinterpret_cast<void*>(resolved.actor),
+            reinterpret_cast<void*>(resolved.root),
+            reinterpret_cast<void*>(resolved.marker),
+            reinterpret_cast<void*>(resolved.health_entry),
+            reinterpret_cast<void*>(resolved.stamina_entry),
+            reinterpret_cast<void*>(resolved.spirit_entry));
+    }
 }
 
 void UpdateTrackedPlayerStatusComponent(const uintptr_t actor, const uintptr_t component) {
@@ -258,282 +104,54 @@ void UpdateTrackedPlayerStatusComponent(const uintptr_t actor, const uintptr_t c
         return;
     }
 
-    const auto current_marker = g_player_status_marker.load(std::memory_order_acquire);
+    const auto current_marker = g_player_resolve.marker;
     if (current_marker == component) {
         return;
     }
 
     std::lock_guard lock(g_state_mutex);
-    if (g_player_status_marker.load(std::memory_order_acquire) == component) {
+    if (g_player_resolve.marker == component) {
         return;
     }
 
-    const uintptr_t stat_root = *reinterpret_cast<const uintptr_t*>(component + 0x18);
+    ActorResolveSnapshot resolved{};
+    if (!TryResolveActorResolveFromMarker(component, &resolved, actor)) {
+        return;
+    }
 
-    g_player_actor = actor;
-    g_player_status_marker.store(component, std::memory_order_release);
-    g_player_stat_root.store(stat_root, std::memory_order_release);
     ResetTrackedEntriesLocked();
+    ResetTrackedMountLocked();
+    g_player_resolve = resolved;
+    ResetTrackedDamageParticipantsLocked();
 
     Log("runtime: tracked player actor=0x%p status_marker=0x%p stat_root=0x%p",
-        reinterpret_cast<void*>(actor),
-        reinterpret_cast<void*>(component),
-        reinterpret_cast<void*>(stat_root));
+        reinterpret_cast<void*>(resolved.actor),
+        reinterpret_cast<void*>(resolved.marker),
+        reinterpret_cast<void*>(resolved.root));
+
+    RefreshTrackedMountFromPlayerActor();
 }
 
 uintptr_t GetTrackedPlayerStatRoot() {
-    return g_player_stat_root.load(std::memory_order_acquire);
+    return g_player_resolve.root;
 }
 
-void ObserveStatEntry(const uintptr_t entry, const uintptr_t component) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire)) {
-        return;
-    }
-
-    const auto& config = GetConfig();
-    if (!config.general.enabled || entry < kMinimumPointerAddress || component < kMinimumPointerAddress) {
-        return;
-    }
-
-    const auto tracked_marker = g_player_status_marker.load(std::memory_order_acquire);
-    const auto component_marker = *reinterpret_cast<const uintptr_t*>(component);
-    if (component_marker != tracked_marker) {
-        return;
-    }
-
-    const auto stat_type = *reinterpret_cast<const int32_t*>(entry);
-    if (!IsTrackedStat(stat_type)) {
-        return;
-    }
-
-    const auto* const current_value_ptr = reinterpret_cast<const int64_t*>(entry + 0x08);
-    const auto* const max_value_ptr = reinterpret_cast<const int64_t*>(entry + 0x18);
-    const int64_t current_value = *current_value_ptr;
-    const int64_t max_value = *max_value_ptr;
-    if (max_value <= 0 || current_value < 0 || current_value > max_value) {
-        return;
-    }
-
-    auto* const entry_slot = SelectEntrySlot(stat_type);
-    if (entry_slot == nullptr) {
-        return;
-    }
-
-    std::lock_guard lock(g_state_mutex);
-    if (*reinterpret_cast<const uintptr_t*>(component) != g_player_status_marker.load(std::memory_order_acquire)) {
-        return;
-    }
-
-    const auto current_entry = entry_slot->load(std::memory_order_acquire);
-    if (current_entry == entry) {
-        return;
-    }
-
-    entry_slot->store(entry, std::memory_order_release);
-
-    const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-    if (current < 16) {
-        Log("runtime: discovered stat entry type=%d entry=0x%p current=%lld max=%lld",
-            stat_type,
-            reinterpret_cast<void*>(entry),
-            static_cast<long long>(current_value),
-            static_cast<long long>(max_value));
-    }
+uintptr_t GetTrackedMountActor() {
+    return g_mount_resolve.actor;
 }
 
-bool TryAdjustStatWrite(const uintptr_t entry, const bool player_context, int64_t* const value) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
-        return false;
-    }
-
-    const auto& config = GetConfig();
-    if (!config.general.enabled || entry < kMinimumPointerAddress) {
-        return false;
-    }
-
-    int32_t stat_type = -1;
-    uintptr_t health_entry = g_health_entry.load(std::memory_order_acquire);
-    if (health_entry < kMinimumPointerAddress) {
-        health_entry = TryResolveHealthEntryFromTrackedRoot();
-    }
-
-    const uintptr_t stamina_entry = g_stamina_entry.load(std::memory_order_acquire);
-    const uintptr_t spirit_entry = g_spirit_entry.load(std::memory_order_acquire);
-    if (entry == health_entry) {
-        stat_type = kHealthId;
-    } else if (entry == stamina_entry) {
-        stat_type = kStaminaId;
-    } else if (entry == spirit_entry) {
-        stat_type = kSpiritId;
-    } else if (player_context) {
-        const int32_t inferred_type = *reinterpret_cast<const int32_t*>(entry);
-        if (IsTrackedStat(inferred_type)) {
-            stat_type = inferred_type;
-
-            if (auto* const entry_slot = SelectEntrySlot(stat_type); entry_slot != nullptr) {
-                entry_slot->store(entry, std::memory_order_release);
-            }
-
-            const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-            if (current < 24) {
-                Log("runtime: inferred stat entry from write context type=%d entry=0x%p",
-                    stat_type,
-                    reinterpret_cast<void*>(entry));
-            }
-        }
-    } else if (TryResolveEntryFromHealthLayout(entry, &stat_type)) {
-        const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: inferred stat entry from health layout type=%d entry=0x%p health=0x%p",
-                stat_type,
-                reinterpret_cast<void*>(entry),
-                reinterpret_cast<void*>(health_entry));
-        }
-    } else {
-        const auto current = g_process_skip_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: write skipped for unknown entry=0x%p", reinterpret_cast<void*>(entry));
-        }
-        return false;
-    }
-
-    if (*reinterpret_cast<const int32_t*>(entry) != stat_type) {
-        const auto current = g_process_skip_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: write skipped, type mismatch entry=0x%p expected=%d actual=%d",
-                reinterpret_cast<void*>(entry),
-                stat_type,
-                *reinterpret_cast<const int32_t*>(entry));
-        }
-        return false;
-    }
-
-    const int64_t old_value = *reinterpret_cast<const int64_t*>(entry + 0x08);
-    const int64_t max_value = *reinterpret_cast<const int64_t*>(entry + 0x18);
-    const int64_t requested_value = *value;
-    if (max_value <= 0 || old_value < 0 || old_value > max_value || requested_value < 0) {
-        const auto current = g_process_skip_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: write skipped, invalid range entry=0x%p old=%lld new=%lld max=%lld",
-                reinterpret_cast<void*>(entry),
-                static_cast<long long>(old_value),
-                static_cast<long long>(requested_value),
-                static_cast<long long>(max_value));
-        }
-        return false;
-    }
-
-    StatConfig stat_config{};
-    if (!SelectConfig(config, stat_type, &stat_config)) {
-        return false;
-    }
-
-    int64_t adjusted_value = requested_value;
-    const int64_t delta = requested_value - old_value;
-    if (delta == 0) {
-        return false;
-    }
-
-    if (delta < 0) {
-        const int64_t consumed = -delta;
-        const int64_t target_consumption = ScaleDelta(consumed, stat_config.consumption_multiplier);
-        const int64_t adjustment = consumed - target_consumption;
-        adjusted_value = ClampToRange(requested_value + adjustment, 0, max_value);
-    } else {
-        const int64_t healed = delta;
-        const int64_t target_heal = ScaleDelta(healed, stat_config.heal_multiplier);
-        const int64_t adjustment = target_heal - healed;
-        adjusted_value = ClampToRange(requested_value + adjustment, 0, max_value);
-    }
-
-    *value = adjusted_value;
-
-    const auto current = g_process_apply_logs.fetch_add(1, std::memory_order_acq_rel);
-    if (current < 24) {
-        Log("runtime: adjusted stat write type=%d old=%lld requested=%lld final=%lld max=%lld",
-            stat_type,
-            static_cast<long long>(old_value),
-            static_cast<long long>(requested_value),
-            static_cast<long long>(adjusted_value),
-            static_cast<long long>(max_value));
-    }
-
-    return adjusted_value != requested_value;
+uintptr_t GetTrackedMountStatRoot() {
+    return g_mount_resolve.root;
 }
 
-bool TryAdjustDurabilityWrite(const uintptr_t entry, uint16_t* const value) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
-        return false;
-    }
-
-    const auto& config = GetConfig();
-    if (!config.general.enabled || entry < kMinimumPointerAddress) {
-        return false;
-    }
-
-    const double chance = config.durability.consumption_chance;
-    if (chance >= 100.0) {
-        return false;
-    }
-
-    const uint16_t old_value = *reinterpret_cast<const uint16_t*>(entry + 0x50);
-    const uint16_t requested_value = *value;
-    if (requested_value >= old_value) {
-        return false;
-    }
-
-    if (!ShouldSkipDurabilityConsumption(entry, chance)) {
-        return false;
-    }
-
-    *value = old_value;
-
-    const auto current = g_durability_logs.fetch_add(1, std::memory_order_acq_rel);
-    if (current < 24) {
-        Log("runtime: skipped maintenance consumption entry=0x%p old=%u requested=%u chance=%.2f",
-            reinterpret_cast<void*>(entry),
-            static_cast<unsigned>(old_value),
-            static_cast<unsigned>(requested_value),
-            chance);
-    }
-
-    return true;
+uintptr_t GetTrackedMountStatusMarker() {
+    return g_mount_resolve.marker;
 }
 
-bool TryAdjustDurabilityDelta(const uintptr_t entry, const uint16_t current_value, int16_t* const delta) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || delta == nullptr) {
-        return false;
-    }
+uintptr_t GetTrackedPlayerActor() {
+    return g_player_resolve.actor;
+}
 
-    const auto& config = GetConfig();
-    if (!config.general.enabled || entry < kMinimumPointerAddress) {
-        return false;
-    }
-
-    if (*delta >= 0) {
-        return false;
-    }
-
-    const double chance = config.durability.consumption_chance;
-    if (chance >= 100.0) {
-        return false;
-    }
-
-    if (!ShouldSkipDurabilityConsumption(entry, chance)) {
-        return false;
-    }
-
-    const int16_t requested_delta = *delta;
-    *delta = 0;
-
-    const auto current = g_durability_logs.fetch_add(1, std::memory_order_acq_rel);
-    if (current < 24) {
-        Log("runtime: skipped durability consumption entry=0x%p current=%u delta=%d chance=%.2f",
-            reinterpret_cast<void*>(entry),
-            static_cast<unsigned>(current_value),
-            static_cast<int>(requested_delta),
-            chance);
-    }
-
-    return true;
+uintptr_t GetTrackedPlayerStatusMarker() {
+    return g_player_resolve.marker;
 }

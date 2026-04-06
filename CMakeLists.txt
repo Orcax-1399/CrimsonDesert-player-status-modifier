@@ -16,11 +16,23 @@ add_library(player-status-modifier SHARED
     src/config_watcher.cpp
     src/dllmain.cpp
     src/hooks.cpp
+    src/hooks/durability_hooks.cpp
+    src/hooks/economy_hooks.cpp
+    src/hooks/install_hooks.cpp
+    src/hooks/player_hooks.cpp
     src/key_listener.cpp
     src/logger.cpp
     src/mod_logic.cpp
+    src/ptrchain.cpp
+    src/ptrchain_resources.cpp
     src/position_control.cpp
-    src/scanner.cpp
+        src/runtime/actor_resolve.cpp
+        src/runtime/damage_logic.cpp
+        src/runtime/durability_logic.cpp
+        src/runtime/mount_resolver.cpp
+        src/runtime/runtime_state.cpp
+        src/runtime/stat_logic.cpp
+        src/scanner.cpp
 )
 
 target_include_directories(player-status-modifier PRIVATE src)
