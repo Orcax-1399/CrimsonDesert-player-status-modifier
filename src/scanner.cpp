@@ -364,6 +364,75 @@ uintptr_t ScanForDamageBattleAccess() {
     return outcome.address;
 }
 
+uintptr_t ScanForDragonVillageSummonJump() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "84 C0 74 09 41 89 1C 24 E9 ?? ?? ?? ?? 8B 47 0C",
+            2,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: dragon-village-summon found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: dragon-village-summon found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
+uintptr_t ScanForDragonFlyingRestrictWrite() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "41 88 47 04 41 89 3F 48 8B 5C 24 ??",
+            0,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: dragon-flying-restrict found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: dragon-flying-restrict found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
+uintptr_t ScanForDragonRoofRestrictTest() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "85 DB 74 59 48 8B 05 ?? ?? ?? ?? 48 8B 48 20 8B D3 48 8B 89 A0 07 00 00",
+            0,
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: dragon-roof-restrict found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: dragon-roof-restrict found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
 uintptr_t ScanForItemGainAccess() {
     static constexpr PatternDefinition kPatterns[] = {
         {"primary", "49 01 4C 38 10", 0},

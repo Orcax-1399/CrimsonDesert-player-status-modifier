@@ -11,6 +11,9 @@ Current runtime behavior is split across several hook paths:
 - player pointer capture
 - player stat entry discovery
 - source stat write interception
+- dragon village summon bypass
+- dragon forced-dismount result rewrite
+- dragon roof summon experimental bypass
 - player damage scaling
 - item gain scaling
 - equipment maintenance consumption control
@@ -36,6 +39,9 @@ The mod currently supports the following configurable features through `player-s
 - Item gain multiplier
 - Equipment maintenance / durability consumption chance
 - Mount health / stamina lock
+- Dragon village summon bypass
+- Dragon forced-dismount bypass
+- Dragon roof summon experimental bypass
 - Position height control
 - Position horizontal movement scaling
 
@@ -48,6 +54,13 @@ The mod currently supports the following configurable features through `player-s
 The mod also watches `player-status-modifier.ini` in the background and reloads changes automatically. Most multipliers update on the next write immediately, while position-control key changes are applied by reconfiguring the listener threads in place. Hook installation itself is still not toggled during runtime.
 
 The repository now also includes `player-status-modifier.default.ini` as a clean baseline. Use it as a reference or restore point if your live config drifts too far during testing.
+
+Dragon limit behavior:
+
+- all three dragon-limit hooks stay passive until the runtime has captured the current player actor and player status marker
+- `village_summon` bypasses the village fast-exit gate and forces the request to continue into the full summon-rule path
+- `cancel_restrict_flying` only rewrites the forced-dismount result signature (`RDI=0x247`, `AL=0`, `[RBX]=6`) and leaves manual dismount behavior intact
+- `roof_summon_experimental` is intentionally disabled by default because it still clears a late callback result and should be treated as experimental
 
 Damage behavior:
 
@@ -84,6 +97,11 @@ Enabled=0
 LockHealth=1
 LockStamina=1
 LockValue=9999999
+
+[DragonLimit]
+roof_summon_experimental=0
+village_summon=1
+cancel_restrict_flying=1
 
 [Position Control(Height)]
 Enable=0
@@ -128,6 +146,13 @@ Mount fields:
 - `LockHealth=1` locks the resolved mount health entry to `LockValue`
 - `LockStamina=1` locks the resolved mount stamina entry to `LockValue`
 - `LockValue` is clamped to the stat max during write interception
+
+DragonLimit fields:
+
+- `roof_summon_experimental=1` enables the current roof / high-place summon experimental bypass; this is still a high-risk result-layer patch and is disabled by default
+- `village_summon=1` enables the village summon bypass by forcing the validated request into the downstream summon-rule chain
+- `cancel_restrict_flying=1` prevents the validated forced-dismount result from ejecting the player from the dragon while keeping manual dismount available
+- none of these dragon-limit edits become active until the mod has already captured the current player actor and player status marker at runtime
 
 Position height control fields:
 

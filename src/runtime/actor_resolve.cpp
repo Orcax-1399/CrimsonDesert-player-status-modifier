@@ -9,6 +9,11 @@
 
 namespace {
 
+constexpr int64_t kMountHealthResolveMinMax = 2500000;
+constexpr int64_t kMountStaminaResolveMinMax = 300000;
+constexpr uintptr_t kResolveRootEntryScanStart = 0x08;
+constexpr uintptr_t kResolveRootEntryScanEnd = 0x200;
+
 bool IsValidStatEntry(const uintptr_t entry, const int32_t expected_type) {
     if (entry < kMinimumPointerAddress) {
         return false;
@@ -21,6 +26,58 @@ bool IsValidStatEntry(const uintptr_t entry, const int32_t expected_type) {
     const int64_t current_value = *reinterpret_cast<const int64_t*>(entry + 0x08);
     const int64_t max_value = *reinterpret_cast<const int64_t*>(entry + 0x18);
     return max_value > 0 && current_value >= 0 && current_value <= max_value;
+}
+
+bool TryGetStatEntryMaxValue(const uintptr_t entry, const int32_t expected_type, int64_t* const max_value) {
+    if (max_value == nullptr || !IsValidStatEntry(entry, expected_type)) {
+        return false;
+    }
+
+    *max_value = *reinterpret_cast<const int64_t*>(entry + 0x18);
+    return true;
+}
+
+void TryResolveLargeMountStatEntries(const uintptr_t root,
+                                     uintptr_t* const health_entry,
+                                     uintptr_t* const stamina_entry) {
+    if (health_entry == nullptr || stamina_entry == nullptr || root < kMinimumPointerAddress) {
+        return;
+    }
+
+    uintptr_t best_health_entry = 0;
+    int64_t best_health_max = 0;
+    uintptr_t best_stamina_entry = 0;
+    int64_t best_stamina_max = 0;
+
+    for (uintptr_t offset = kResolveRootEntryScanStart; offset <= kResolveRootEntryScanEnd; offset += sizeof(uintptr_t)) {
+        uintptr_t candidate = 0;
+        if (!TryReadPointer(root + offset, &candidate) || candidate < kMinimumPointerAddress) {
+            continue;
+        }
+
+        int64_t candidate_max = 0;
+        if (TryGetStatEntryMaxValue(candidate, kHealthId, &candidate_max) &&
+            candidate_max >= kMountHealthResolveMinMax &&
+            candidate_max >= best_health_max) {
+            best_health_entry = candidate;
+            best_health_max = candidate_max;
+        }
+
+        if (TryGetStatEntryMaxValue(candidate, kStaminaId, &candidate_max) &&
+            candidate_max >= kMountStaminaResolveMinMax &&
+            candidate_max >= best_stamina_max) {
+            best_stamina_entry = candidate;
+            best_stamina_max = candidate_max;
+        }
+    }
+
+    if (best_health_entry >= kMinimumPointerAddress) {
+        *health_entry = best_health_entry;
+    }
+
+    if (best_stamina_entry >= kMinimumPointerAddress) {
+        *stamina_entry = best_stamina_entry;
+    }
 }
 
 bool TryResolveActorFromMarker(const uintptr_t marker, uintptr_t* const actor) {
@@ -163,12 +220,35 @@ bool TryResolveActorResolveFromMarker(const uintptr_t marker,
     }
 
     uintptr_t health_entry = 0;
-    if (!TryReadPointer(root + 0x58, &health_entry) || !IsValidStatEntry(health_entry, kHealthId)) {
-        return false;
+    if (TryReadPointer(root + 0x58, &health_entry) && !IsValidStatEntry(health_entry, kHealthId)) {
+        health_entry = 0;
     }
 
-    const uintptr_t stamina_entry = health_entry + kStaminaEntryOffsetFromHealth;
-    if (!IsValidStatEntry(stamina_entry, kStaminaId)) {
+    uintptr_t stamina_entry = 0;
+    if (health_entry >= kMinimumPointerAddress) {
+        const uintptr_t candidate_stamina_entry = health_entry + kStaminaEntryOffsetFromHealth;
+        if (IsValidStatEntry(candidate_stamina_entry, kStaminaId)) {
+            stamina_entry = candidate_stamina_entry;
+        }
+    }
+
+    TryResolveLargeMountStatEntries(root, &health_entry, &stamina_entry);
+
+    if (health_entry < kMinimumPointerAddress && stamina_entry >= kMinimumPointerAddress) {
+        const uintptr_t candidate_health_entry = stamina_entry - kStaminaEntryOffsetFromHealth;
+        if (IsValidStatEntry(candidate_health_entry, kHealthId)) {
+            health_entry = candidate_health_entry;
+        }
+    }
+
+    if (stamina_entry < kMinimumPointerAddress && health_entry >= kMinimumPointerAddress) {
+        const uintptr_t candidate_stamina_entry = health_entry + kStaminaEntryOffsetFromHealth;
+        if (IsValidStatEntry(candidate_stamina_entry, kStaminaId)) {
+            stamina_entry = candidate_stamina_entry;
+        }
+    }
+
+    if (!IsValidStatEntry(health_entry, kHealthId) || !IsValidStatEntry(stamina_entry, kStaminaId)) {
         return false;
     }
 

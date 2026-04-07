@@ -142,6 +142,12 @@ bool ReadConfigSnapshot(const std::wstring& config_path, ModConfig* const config
     next.mount.lock_stamina = ReadBool(L"Mount", L"LockStamina", next.mount.lock_stamina, config_path);
     next.mount.lock_value = static_cast<int64_t>(
         ReadDword(L"Mount", L"LockValue", static_cast<DWORD>(next.mount.lock_value), config_path));
+    next.dragon_limit.roof_summon_experimental =
+        ReadBool(L"DragonLimit", L"roof_summon_experimental", next.dragon_limit.roof_summon_experimental, config_path);
+    next.dragon_limit.village_summon =
+        ReadBool(L"DragonLimit", L"village_summon", next.dragon_limit.village_summon, config_path);
+    next.dragon_limit.cancel_restrict_flying =
+        ReadBool(L"DragonLimit", L"cancel_restrict_flying", next.dragon_limit.cancel_restrict_flying, config_path);
     next.position_control.enabled =
         ReadBool(L"Position Control(Height)", L"Enable", next.position_control.enabled, config_path);
     next.position_control.key =

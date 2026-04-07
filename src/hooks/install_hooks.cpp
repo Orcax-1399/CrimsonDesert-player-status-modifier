@@ -1,5 +1,6 @@
 #include "hooks.h"
 
+#include "config.h"
 #include "hooks/hooks_internal.h"
 
 #include "logger.h"
@@ -9,6 +10,9 @@ std::mutex g_hook_mutex;
 SafetyHookMid g_player_pointer_hook{};
 SafetyHookMid g_stats_hook{};
 SafetyHookMid g_stat_write_hook{};
+SafetyHookMid g_dragon_village_summon_hook{};
+SafetyHookInline g_dragon_flying_restrict_hook{};
+SafetyHookMid g_dragon_roof_restrict_hook{};
 SafetyHookMid g_damage_hook{};
 SafetyHookMid g_item_gain_hook{};
 SafetyHookMid g_durability_hook{};
@@ -36,9 +40,13 @@ std::atomic<std::uint32_t> g_abyss_durability_delta_samples{0};
 namespace {
 
 bool AreCoreHooksInstalled() {
+    const auto config = GetConfig();
     return g_player_pointer_hook &&
            g_stats_hook &&
            g_stat_write_hook &&
+           (!config.dragon_limit.village_summon || g_dragon_village_summon_hook) &&
+           (!config.dragon_limit.cancel_restrict_flying || g_dragon_flying_restrict_hook) &&
+           (!config.dragon_limit.roof_summon_experimental || g_dragon_roof_restrict_hook) &&
            g_damage_hook &&
            g_item_gain_hook &&
            g_durability_hook &&
@@ -49,6 +57,7 @@ bool AreCoreHooksInstalled() {
 void RemoveHooksLocked() {
     RemoveDurabilityHooks();
     RemoveEconomyHooks();
+    RemoveDragonLimitHooks();
     RemovePlayerHooks();
 }
 
@@ -63,6 +72,11 @@ bool InstallHooks() {
     RemoveHooksLocked();
 
     if (!InstallPlayerHooks()) {
+        RemoveHooksLocked();
+        return false;
+    }
+
+    if (!InstallDragonLimitHooks()) {
         RemoveHooksLocked();
         return false;
     }

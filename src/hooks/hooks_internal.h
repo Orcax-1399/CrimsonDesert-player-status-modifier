@@ -13,6 +13,9 @@ extern std::mutex g_hook_mutex;
 extern SafetyHookMid g_player_pointer_hook;
 extern SafetyHookMid g_stats_hook;
 extern SafetyHookMid g_stat_write_hook;
+extern SafetyHookMid g_dragon_village_summon_hook;
+extern SafetyHookInline g_dragon_flying_restrict_hook;
+extern SafetyHookMid g_dragon_roof_restrict_hook;
 extern SafetyHookMid g_damage_hook;
 extern SafetyHookMid g_item_gain_hook;
 extern SafetyHookMid g_durability_hook;
@@ -44,6 +47,9 @@ inline bool ShouldLogSample(std::atomic<std::uint32_t>& counter, const std::uint
 
 bool InstallPlayerHooks();
 void RemovePlayerHooks();
+
+bool InstallDragonLimitHooks();
+void RemoveDragonLimitHooks();
 
 bool InstallEconomyHooks();
 void RemoveEconomyHooks();

@@ -58,6 +58,14 @@ struct MountConfig {
     bool operator==(const MountConfig&) const = default;
 };
 
+struct DragonLimitConfig {
+    bool roof_summon_experimental = false;
+    bool village_summon = true;
+    bool cancel_restrict_flying = true;
+
+    bool operator==(const DragonLimitConfig&) const = default;
+};
+
 struct GeneralConfig {
     bool enabled = true;
     bool log_enabled = true;
@@ -74,6 +82,7 @@ struct ModConfig {
     ItemConfig items;
     DurabilityConfig durability;
     MountConfig mount;
+    DragonLimitConfig dragon_limit;
     PositionControlConfig position_control;
     StatConfig health{0.5, 2.0};
     StatConfig stamina{0.5, 1.0};

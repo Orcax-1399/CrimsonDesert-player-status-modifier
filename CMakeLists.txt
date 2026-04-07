@@ -16,6 +16,7 @@ add_library(player-status-modifier SHARED
     src/config_watcher.cpp
     src/dllmain.cpp
     src/hooks.cpp
+    src/hooks/dragon_limit_hooks.cpp
     src/hooks/durability_hooks.cpp
     src/hooks/economy_hooks.cpp
     src/hooks/install_hooks.cpp

@@ -84,7 +84,7 @@ mov rdx,[rax+20]
 
 ## Dragon / Mount 识别
 
-当前已确认一条比旧 `mount-pointer` 批处理入口更干净的链：
+下面这条旧链路已经被证伪，必须判死，不要再把它当作当前有效结论使用：
 
 ```text
 player actor + 0xA20 -> current dragon marker
@@ -95,21 +95,13 @@ root + 0x58 -> health entry
 health entry + 0x480 -> stamina entry
 ```
 
-已在 live 进程验证样本：
+需要明确：
 
-- 玩家 actor：`0x597B21B0400`
-- 玩家 marker：`0x597B2260A00`
-- 当前 dragon marker：`[player+0xA20] = 0x597D0470500`
-- dragon actor：`[[marker+0x8]+0x68] = 0x597B21B0E00`
-
-说明：
-
-- dragon / mount 追踪应当以“玩家先行”为准
-- 优先从玩家 actor 直接取当前 dragon marker，不要再回到旧的批量 actor 枚举入口
-- 旧的 `mount-pointer hook` 所在点会遍历整批同类 actor，天然高噪声，不能作为稳定 dragon 单点来源
-- dragon 的 damage actor 不再做旧的回推猜测，直接使用 `[[marker+0x8]+0x68]`
-- 该地址在 CE dissect 中可视作 `FrameEventActorComponent`
-- damage 侧如需识别 dragon，应优先复用这条链解析出的 `tracked mount actor`
+- 不要再写“`player + 0xA20` 可以直接稳定拿到当前 dragon marker”。
+- 不要再把这条链当作 dragon / mount 识别主线。
+- 不要再基于这条链设计 hook、追踪逻辑或 damage 识别。
+- 当前关于 dragon 的可靠定位，必须回到已经动态验证过的指针链本身，不能把这条旧链包装成既定事实。
+- 旧的 `mount-pointer hook` 批量枚举入口同样仍然是高噪声来源，不能因为否定了 `player+0xA20` 就回退把它当成稳定单点。
 
 ## 属性访问点
 
@@ -266,7 +258,7 @@ HealMultiplier=2.0
 说明：
 
 - dragon / mount 不再使用独立 `mount-pointer hook`
-- 当前实现改为在玩家已捕获后，从玩家 actor 直接刷新 dragon marker / root / entry
+- 不要在这里补写任何基于 `player + 0xA20` 的旧 dragon 链说明；该链已在上文判死
 
 ---
 
@@ -278,8 +270,8 @@ HealMultiplier=2.0
 - 主写入点修改必须建立在已发现 entry 白名单之上
 - 如果 entry 匹配不到，必须完全跳过，不允许猜测
 - 玩家判定优先基于已捕获 `status marker`
-- dragon / mount 判定优先基于玩家 actor 上的当前 dragon marker 链，不要再接回旧的批量 actor attach 点
-- dragon actor 统一按 `marker -> [marker+8] -> +0x68` 解析，不再使用旧的 `marker+0x20` / `actor+0x20` 回推
+- dragon / mount 相关旧链目前没有可直接写死到规范里的稳定主线；如果后续继续研究，必须以新的动态验证结果为准
+- 不要把 `player + 0xA20`、`marker -> [marker+8] -> +0x68`、或旧的批量 actor attach 点重新写回为既定事实
 - 新增 hook 时优先沿用 `safetyhook`
 - 新增 AOB 时优先保留主 pattern + fallback pattern
 - 高噪声热路径上的日志必须限量，避免刷爆日志
