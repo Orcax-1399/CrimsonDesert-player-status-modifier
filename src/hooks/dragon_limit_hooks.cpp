@@ -193,15 +193,15 @@ bool InstallDragonRoofRestrictHook() {
 bool InstallDragonLimitHooks() {
     const auto config = GetConfig();
 
-    if (config.dragon_limit.village_summon && !InstallDragonVillageSummonHook()) {
+    if (ShouldInstallDragonVillageSummonHook(config) && !InstallDragonVillageSummonHook()) {
         return false;
     }
 
-    if (config.dragon_limit.cancel_restrict_flying && !InstallDragonFlyingRestrictHook()) {
+    if (ShouldInstallDragonFlyingRestrictHook(config) && !InstallDragonFlyingRestrictHook()) {
         return false;
     }
 
-    if (config.dragon_limit.roof_summon_experimental && !InstallDragonRoofRestrictHook()) {
+    if (ShouldInstallDragonRoofRestrictHook(config) && !InstallDragonRoofRestrictHook()) {
         return false;
     }
 

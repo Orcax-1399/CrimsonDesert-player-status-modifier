@@ -1,5 +1,6 @@
 #include "hooks/hooks_internal.h"
 
+#include "config.h"
 #include "logger.h"
 #include "mod_logic.h"
 #include "scanner.h"
@@ -163,6 +164,11 @@ bool InstallAbyssDurabilityDeltaHook() {
 }  // namespace
 
 bool InstallDurabilityHooks() {
+    const auto config = GetConfig();
+    if (!ShouldInstallDurabilityHooks(config)) {
+        return true;
+    }
+
     return InstallDurabilityWriteHook() &&
            InstallDurabilityDeltaHook() &&
            InstallAbyssDurabilityDeltaHook();

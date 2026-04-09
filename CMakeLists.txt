@@ -14,11 +14,12 @@ add_subdirectory(deps/safetyhook)
 add_library(player-status-modifier SHARED
     src/config.cpp
     src/config_watcher.cpp
-    src/dllmain.cpp
-    src/hooks.cpp
-    src/hooks/dragon_limit_hooks.cpp
-    src/hooks/durability_hooks.cpp
-    src/hooks/economy_hooks.cpp
+        src/dllmain.cpp
+        src/hooks.cpp
+        src/hooks/affinity_hooks.cpp
+        src/hooks/dragon_limit_hooks.cpp
+        src/hooks/durability_hooks.cpp
+        src/hooks/economy_hooks.cpp
     src/hooks/install_hooks.cpp
     src/hooks/player_hooks.cpp
     src/key_listener.cpp
@@ -27,9 +28,10 @@ add_library(player-status-modifier SHARED
     src/ptrchain.cpp
     src/ptrchain_resources.cpp
     src/position_control.cpp
-        src/runtime/actor_resolve.cpp
-        src/runtime/damage_logic.cpp
-        src/runtime/durability_logic.cpp
+            src/runtime/actor_resolve.cpp
+            src/runtime/affinity_logic.cpp
+            src/runtime/damage_logic.cpp
+            src/runtime/durability_logic.cpp
         src/runtime/mount_resolver.cpp
         src/runtime/runtime_state.cpp
         src/runtime/stat_logic.cpp

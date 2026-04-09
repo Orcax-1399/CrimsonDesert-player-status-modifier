@@ -16,6 +16,7 @@ Current runtime behavior is split across several hook paths:
 - dragon roof summon experimental bypass
 - player damage scaling
 - item gain scaling
+- affinity gain scaling
 - equipment maintenance consumption control
 - weapon durability consumption control
 - optional position height control
@@ -37,6 +38,7 @@ The mod currently supports the following configurable features through `player-s
 - Outgoing damage multiplier
 - Incoming damage multiplier
 - Item gain multiplier
+- Affinity gain multiplier
 - Equipment maintenance / durability consumption chance
 - Mount health / stamina lock
 - Dragon village summon bypass
@@ -52,6 +54,13 @@ The mod currently supports the following configurable features through `player-s
 `Position Control(Horizontal)` is also disabled by default. When enabled, the same controlled-character position hook scales the X/Z movement delta while the configured key is held, without scaling the absolute world position itself.
 
 The mod also watches `player-status-modifier.ini` in the background and reloads changes automatically. Most multipliers update on the next write immediately, while position-control key changes are applied by reconfiguring the listener threads in place. Hook installation itself is still not toggled during runtime.
+
+Hook installation policy:
+
+- player-pointer capture always stays installed because the rest of the runtime depends on it
+- shared player stat hooks (`stats` + `stat-write`) are only installed when at least one of `Health`, `Stamina`, or `Spirit` is not neutral (`1.0 / 1.0`), or mount stat locking is enabled
+- damage, items, affinity, durability, dragon-limit, and position-control hooks are only installed when their corresponding feature is actually enabled in the config
+- if an INI edit changes the required hook loadout, the watcher logs a restart warning; toggling hooks on or off still requires a game restart
 
 The repository now also includes `player-status-modifier.default.ini` as a clean baseline. Use it as a reference or restore point if your live config drifts too far during testing.
 
@@ -88,6 +97,9 @@ Multiplier=1.0
 
 [Items]
 GainMultiplier=2.0
+
+[Affinity]
+Multiplier=1.0
 
 [Durability]
 ConsumptionChance=100.0
@@ -139,6 +151,11 @@ Damage fields:
 - `OutgoingDamage.Multiplier` scales outgoing negative health deltas
 - `IncomingDamage.Enable=1` enables incoming damage scaling against the resolved player target
 - `IncomingDamage.Multiplier` scales incoming negative health deltas; `1.0` means unchanged
+
+Affinity fields:
+
+- `Multiplier` scales committed affinity gain writes and is clamped by the game-side cap
+- `1.0` keeps affinity unchanged and skips installing the affinity write hooks entirely
 
 Mount fields:
 

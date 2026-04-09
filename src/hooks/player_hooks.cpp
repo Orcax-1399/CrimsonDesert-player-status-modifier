@@ -160,12 +160,15 @@ bool InstallStatWriteHook() {
 }  // namespace
 
 bool InstallPlayerHooks() {
-    return InstallPlayerPointerHook() &&
-           InstallStatsHook() &&
+    return InstallPlayerPointerHook();
+}
+
+bool InstallPlayerStatHooks() {
+    return InstallStatsHook() &&
            InstallStatWriteHook();
 }
 
-void RemovePlayerHooks() {
+void RemovePlayerStatHooks() {
     if (g_stat_write_hook) {
         g_stat_write_hook.reset();
         Log("hooks: removed stat-write hook");
@@ -175,6 +178,10 @@ void RemovePlayerHooks() {
         g_stats_hook.reset();
         Log("hooks: removed stats hook");
     }
+}
+
+void RemovePlayerHooks() {
+    RemovePlayerStatHooks();
 
     if (g_player_pointer_hook) {
         g_player_pointer_hook.reset();

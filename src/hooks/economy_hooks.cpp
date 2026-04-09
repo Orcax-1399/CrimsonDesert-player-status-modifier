@@ -1,5 +1,6 @@
 #include "hooks/hooks_internal.h"
 
+#include "config.h"
 #include "logger.h"
 #include "mod_logic.h"
 #include "position_control.h"
@@ -136,8 +137,17 @@ bool InstallItemGainHook() {
 }  // namespace
 
 bool InstallEconomyHooks() {
-    return InstallDamageHook() &&
-           InstallItemGainHook();
+    const auto config = GetConfig();
+
+    if (ShouldInstallDamageHook(config) && !InstallDamageHook()) {
+        return false;
+    }
+
+    if (ShouldInstallItemGainHook(config) && !InstallItemGainHook()) {
+        return false;
+    }
+
+    return true;
 }
 
 void RemoveEconomyHooks() {

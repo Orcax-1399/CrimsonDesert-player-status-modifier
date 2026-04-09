@@ -130,13 +130,14 @@ bool ReadConfigSnapshot(const std::wstring& config_path, ModConfig* const config
         ReadBool(L"OutgoingDamage", L"Enabled", has_legacy_damage_multiplier, config_path);
     next.damage.outgoing.multiplier =
         ReadDouble(L"OutgoingDamage", L"Multiplier", legacy_damage_multiplier, config_path);
-    next.damage.incoming.enabled =
-        ReadBool(L"IncomingDamage", L"Enabled", next.damage.incoming.enabled, config_path);
-    next.damage.incoming.multiplier =
-        ReadDouble(L"IncomingDamage", L"Multiplier", next.damage.incoming.multiplier, config_path);
-    next.items.gain_multiplier = ReadDouble(L"Items", L"GainMultiplier", next.items.gain_multiplier, config_path);
-    next.durability.consumption_chance =
-        ReadDoubleRaw(L"Durability", L"ConsumptionChance", next.durability.consumption_chance, config_path);
+        next.damage.incoming.enabled =
+            ReadBool(L"IncomingDamage", L"Enabled", next.damage.incoming.enabled, config_path);
+        next.damage.incoming.multiplier =
+            ReadDouble(L"IncomingDamage", L"Multiplier", next.damage.incoming.multiplier, config_path);
+        next.items.gain_multiplier = ReadDouble(L"Items", L"GainMultiplier", next.items.gain_multiplier, config_path);
+        next.affinity.multiplier = ReadDouble(L"Affinity", L"Multiplier", next.affinity.multiplier, config_path);
+        next.durability.consumption_chance =
+            ReadDoubleRaw(L"Durability", L"ConsumptionChance", next.durability.consumption_chance, config_path);
     next.mount.enabled = ReadBool(L"Mount", L"Enabled", next.mount.enabled, config_path);
     next.mount.lock_health = ReadBool(L"Mount", L"LockHealth", next.mount.lock_health, config_path);
     next.mount.lock_stamina = ReadBool(L"Mount", L"LockStamina", next.mount.lock_stamina, config_path);

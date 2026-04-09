@@ -50,6 +50,7 @@ extern std::atomic<std::uint32_t> g_process_apply_logs;
 extern std::atomic<std::uint32_t> g_discovery_logs;
 extern std::atomic<std::uint32_t> g_durability_logs;
 extern std::atomic<std::uint32_t> g_damage_logs;
+extern std::atomic<std::uint32_t> g_affinity_logs;
 extern std::atomic<std::uint32_t> g_mount_logs;
 extern std::atomic<std::uint32_t> g_actor_resolve_logs;
 extern std::atomic<std::uint32_t> g_mount_candidate_logs;

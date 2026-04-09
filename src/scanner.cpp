@@ -454,6 +454,39 @@ uintptr_t ScanForItemGainAccess() {
     return outcome.address;
 }
 
+uintptr_t ScanForAffinityGainCommit() {
+    static constexpr PatternDefinition kPatterns[] = {
+        {
+            "primary",
+            "49 89 E3 53 55 56 57 41 56 48 83 EC 60 48 89 D7 48 8D 69 18 0F B7 42 04 66 41 89 43 08 49 8D 4B",
+            0,
+        },
+        {
+            "wildcard-entry",
+            "49 89 E3 53 55 56 57 41 56 48 83 EC 60 48 ?? D7 48 8D 69 18 0F B7 42 04",
+            0,
+        },
+        {
+            "wildcard-prolog",
+            "48 83 EC 60 48 ?? D7 48 8D 69 18 0F B7 42 04 66 41 89 43 08",
+            static_cast<std::size_t>(-9),
+        },
+    };
+
+    const auto outcome = ScanInSections(kPatterns, sizeof(kPatterns) / sizeof(kPatterns[0]));
+    if (outcome.status == ScanStatus::Ambiguous) {
+        Log("scanner: affinity-gain found multiple matches, install failed");
+        return 0;
+    }
+
+    if (outcome.status != ScanStatus::Unique) {
+        Log("scanner: affinity-gain found 0 matches");
+        return 0;
+    }
+
+    return outcome.address;
+}
+
 uintptr_t ScanForDurabilityWriteAccess() {
     static constexpr PatternDefinition kPatterns[] = {
         {

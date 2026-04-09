@@ -18,6 +18,18 @@ constexpr DWORD kConfigReloadSettleMs = 200;
 std::atomic<bool> g_config_watcher_running{false};
 std::thread g_config_watcher_thread{};
 
+bool DidHookRequirementsChange(const ModConfig& previous, const ModConfig& next) {
+    return ShouldInstallSharedStatHooks(previous) != ShouldInstallSharedStatHooks(next) ||
+           ShouldInstallDamageHook(previous) != ShouldInstallDamageHook(next) ||
+           ShouldInstallItemGainHook(previous) != ShouldInstallItemGainHook(next) ||
+           ShouldInstallAffinityHook(previous) != ShouldInstallAffinityHook(next) ||
+           ShouldInstallDurabilityHooks(previous) != ShouldInstallDurabilityHooks(next) ||
+           ShouldInstallDragonVillageSummonHook(previous) != ShouldInstallDragonVillageSummonHook(next) ||
+           ShouldInstallDragonFlyingRestrictHook(previous) != ShouldInstallDragonFlyingRestrictHook(next) ||
+           ShouldInstallDragonRoofRestrictHook(previous) != ShouldInstallDragonRoofRestrictHook(next) ||
+           ShouldInstallPositionHeightHook(previous) != ShouldInstallPositionHeightHook(next);
+}
+
 bool TryGetLastWriteTimestamp(const std::wstring& path, ULONGLONG* const timestamp) {
     if (timestamp == nullptr) {
         return false;
@@ -103,12 +115,16 @@ void ConfigWatcherLoop() {
             continue;
         }
 
-        SetConfigSnapshot(config_path, next);
-        ApplyLoggerReload(previous.general.log_enabled, next.general.log_enabled);
+            SetConfigSnapshot(config_path, next);
+            ApplyLoggerReload(previous.general.log_enabled, next.general.log_enabled);
 
-        if (disabled_position_control && next.general.log_enabled) {
-            Log("config-watcher: position control requested but position hook is unavailable");
-        }
+            if (DidHookRequirementsChange(previous, next) && next.general.log_enabled) {
+                Log("config-watcher: hook loadout changed; restart game to apply hook enable/disable changes");
+            }
+
+            if (disabled_position_control && next.general.log_enabled) {
+                Log("config-watcher: position control requested but position hook is unavailable");
+            }
     }
 }
 

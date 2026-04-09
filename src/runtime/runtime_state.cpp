@@ -13,6 +13,7 @@ std::atomic<std::uint32_t> g_process_apply_logs{0};
 std::atomic<std::uint32_t> g_discovery_logs{0};
 std::atomic<std::uint32_t> g_durability_logs{0};
 std::atomic<std::uint32_t> g_damage_logs{0};
+std::atomic<std::uint32_t> g_affinity_logs{0};
 std::atomic<std::uint32_t> g_mount_logs{0};
 std::atomic<std::uint32_t> g_actor_resolve_logs{0};
 std::atomic<std::uint32_t> g_mount_candidate_logs{0};

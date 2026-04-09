@@ -15,6 +15,7 @@ uintptr_t ScanForDragonFlyingRestrictWrite();
 uintptr_t ScanForDragonRoofRestrictTest();
 uintptr_t ScanForDragonVillageSummonJump();
 uintptr_t ScanForAbyssDurabilityDeltaAccess();
+uintptr_t ScanForAffinityGainCommit();
 uintptr_t ScanForDurabilityDeltaAccess();
 uintptr_t ScanForDurabilityWriteAccess();
 uintptr_t ScanForItemGainAccess();
