@@ -37,16 +37,16 @@
 1. `stats` hook 只负责发现玩家真实属性 entry
 2. `player spirit` 已从共享 `stat-write` 迁到独立 `spirit-delta` 语义点
 3. `player health` 不再依赖 `stat-write` 做回复倍率，当前优先走 `damage/incoming` 语义点
-4. `player stamina` 已经从共享 `stat-write` 路径摘掉，且当前也不再在 `AB00` 上直接做倍率
+4. `player stamina` 当前重新挂回共享 `stat-write` 提交层，但只允许对白名单里的玩家耐力 entry 生效
 5. `mount stamina` 继续走 `AB00` 新入口，目标是直接锁耐力
 6. `mount health` 继续走 `damage/incoming` 那条链，目标是直接锁血
 
 也就是说：
 
 - `stats` hook 只做白名单发现，不做数值补偿
-- 共享 `stat-write` 当前不再负责 `player health` / `player stamina` / `player spirit`
+- 共享 `stat-write` 当前只负责 `player stamina`
 - `player spirit` 当前走独立 signed-delta 线路，不再在共享写回点上补偿
-- `player stamina` 当前处于“已摘出旧线路，等待更上层语义点”的状态
+- `player stamina` 当前正式规则是：`rdi == tracked player stamina entry` 时才允许改写
 - 如果 `entry` 不在已发现白名单里，绝对不能修改
 
 ### 玩家伤害
@@ -188,8 +188,9 @@ mov [rdi+08],rbx
 
 当前工程状态补充：
 
-- 这条共享 `stat-write` 逻辑已不再承载 `player health` / `player stamina` / `player spirit`
-- 代码里保留 legacy 逻辑仅用于参考，不应再把它当作玩家三属性的主线路
+- 这条共享 `stat-write` 逻辑当前只承载 `player stamina`
+- `player health` / `player spirit` 不再走这里
+- `player stamina` 在这里的唯一身份门控是：`rdi == tracked player stamina entry`
 
 ## Spirit 新入口
 
@@ -271,7 +272,8 @@ call sub_1412EB4C0
 
 - `mount stamina` 可继续挂在 `AB00`，因为 mount 只需要“直接锁”
 - `player stamina` 不要继续在 `AB00` 上做倍率
-- `player stamina` 后续应继续往上追 `sub_1412E76A0` 及其 caller，而不是在 `AB00` 上猜正负配对
+- `player stamina` 当前正式实现回到 `stat-write`，`AB00` 只保留 mount 路线
+- 如果后续继续研究上层语义点，也不要影响现有 `stat-write` 白名单门控
 
 ## Player Stamina 上层链
 
@@ -400,7 +402,7 @@ HealMultiplier=2.0
 - `player-pointer hook`：捕获玩家 `status marker`
 - `stats hook`：发现玩家三属性 entry
 - `spirit-delta hook`：在 `CrimsonDesert.exe+C6A72AB` 上处理玩家 `spirit` 的 signed delta
-- `stat-write hook`：legacy 保留代码，当前默认不安装，也不再承担玩家三属性主逻辑
+- `stat-write hook`：当前只处理 `player stamina`，且只在 `rdi == tracked player stamina entry` 时改写
 - `stamina-ab00 hook`：当前主要负责 `mount stamina` 锁定与现场 mount 重建
 - `damage hook`：处理玩家伤害倍率
 - `damage/incoming`：当前也承载 `player health` 回复倍率与 `mount health` 锁定
@@ -426,7 +428,9 @@ HealMultiplier=2.0
 - `player spirit` 优先继续沿用 `CrimsonDesert.exe+C6A72AB` 这条 signed-delta 线路，不要退回共享 `stat-write`
 - `mount stamina` 允许继续留在 `AB00`，因为该功能目标是“直接锁”
 - `player stamina` 不要继续在 `AB00` 上做倍率；该点目前只应视为 mount 可用点和 player 现场观察点
-- 如果要恢复 `player stamina` 倍率，优先继续研究 `sub_1412E9930 -> sub_1412E76A0 -> sub_1412EAB00` 这条上层调用链
+- `player stamina` 当前共享写回层的正式门控就是 `rdi == tracked player stamina entry`
+- 不要再给 `player stamina` 额外叠加 `tracked_root` / `player_context` 之类的旧过滤
+- 如果后续要迁回更上层语义点，先保留当前 `stat-write` 路线作为稳定回退
 - 亲密度倍率优先挂在 `CrimsonDesert.exe+5B6E2C` 这个预提交新值点，基于 `r12` 与 `[rdi+10]` 的正增量改写
 - 不要再把亲密度主逻辑挂回 `CrimsonDesert.exe+E2DFC0B` 的通用 record 结构写回点
 - dragon / mount 相关旧链目前没有可直接写死到规范里的稳定主线；如果后续继续研究，必须以新的动态验证结果为准

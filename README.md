@@ -29,7 +29,7 @@ For player stats, the runtime is now split by semantics instead of forcing every
 - `stats` only discovers the player's real stat entries
 - `spirit` adjusts signed delta at `CrimsonDesert.exe+C6A72AB`
 - `player health` recovery scaling currently rides the incoming-damage semantic path
-- `player stamina` is no longer scaled at the shared write path or at `AB00`
+- `player stamina` scales again at the shared `stat-write` commit point, but only when `rdi == tracked player stamina entry`
 - `mount stamina` still uses `AB00` because that feature only needs a direct lock
 
 ## Current Features

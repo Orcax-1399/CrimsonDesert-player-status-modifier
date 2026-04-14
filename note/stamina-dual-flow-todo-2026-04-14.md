@@ -5,6 +5,9 @@
 - 2026-04-14 最新结论：
   - 这份“双流直接 hook”方案已暂停
   - `player stamina` 改回 `stat-write`
+  - `player stamina` 在 mod 里的最终门控收敛为：
+    - `rdi == tracked player stamina entry`
+    - 玩家未初始化时完全不工作
   - `AB00` 继续只给 `mount stamina`
 
 ## Goal
@@ -55,10 +58,14 @@
 ## Status
 
 - 2026-04-14:
-  - 文档、TODO、scanner、hook、runtime 已全部落地
+  - 双流直接 hook 方案已回退
+  - `player stamina` 当前正式实现为：
+    - `stat-write` 提交层缩放
+    - 仅对白名单 `tracked player stamina entry` 生效
+  - `mount stamina` 继续留在 `AB00`
+  - 文档、TODO、hook、runtime 已回填到当前决策
   - `Release` 已成功编译：
     - `build\\Release\\player-status-modifier.asi`
-  - 当前仍缺：
-    - 游戏内动态验证双流是否都按 `Stamina.ConsumptionMultiplier` 生效
-    - 确认持续消耗线只影响玩家，不污染其他 owner
-    - 确认瞬时消耗线不会误伤 mount 或回复侧提交
+  - 当前剩余风险：
+    - `player stamina` 仍是通用提交层，不是更高语义点
+    - 但现阶段已确认只需 `entry` 白名单即可稳定过滤

@@ -9,95 +9,6 @@
 
 namespace {
 
-      bool TryScalePlayerStaminaConsume(const ModConfig& config,
-                                        const int64_t original_value,
-                                        int64_t* const adjusted_value) {
-          if (adjusted_value == nullptr || original_value >= 0) {
-              return false;
-          }
-
-          if (config.stamina.consumption_multiplier == 1.0) {
-              return false;
-          }
-
-          const int64_t scaled = -ScaleDelta(-original_value, config.stamina.consumption_multiplier);
-          if (scaled == original_value) {
-              return false;
-          }
-
-          *adjusted_value = scaled;
-          return true;
-      }
-
-      bool TryResolvePlayerStatTypeFromWrite(const uintptr_t entry,
-                                             const int32_t actual_type,
-                                             const bool player_context,
-                                             int32_t* const stat_type) {
-    if (stat_type == nullptr) {
-        return false;
-    }
-
-    *stat_type = -1;
-
-    const ActorResolveSnapshot player_snapshot = g_player_resolve;
-    const uintptr_t health_entry = player_snapshot.health_entry;
-    const uintptr_t stamina_entry = player_snapshot.stamina_entry;
-    const uintptr_t spirit_entry = player_snapshot.spirit_entry;
-    if (entry == health_entry) {
-        *stat_type = kHealthId;
-    } else if (entry == stamina_entry) {
-        *stat_type = kStaminaId;
-    } else if (entry == spirit_entry) {
-        *stat_type = kSpiritId;
-    } else if (player_context) {
-        if (IsTrackedStat(actual_type)) {
-            *stat_type = actual_type;
-            std::lock_guard lock(g_state_mutex);
-            TryAssignPlayerResolvedEntry(entry, *stat_type);
-
-            const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-            if (current < 24) {
-                Log("runtime: inferred stat entry from write context type=%d entry=0x%p",
-                    *stat_type,
-                    reinterpret_cast<void*>(entry));
-            }
-        }
-    } else if (entry == health_entry + kStaminaEntryOffsetFromHealth) {
-        *stat_type = kStaminaId;
-        const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: inferred stat entry from health layout type=%d entry=0x%p health=0x%p",
-                *stat_type,
-                reinterpret_cast<void*>(entry),
-                reinterpret_cast<void*>(health_entry));
-        }
-    } else if (spirit_entry >= kMinimumPointerAddress && entry == spirit_entry) {
-        *stat_type = kSpiritId;
-        const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: inferred stat entry from health layout type=%d entry=0x%p health=0x%p",
-                *stat_type,
-                reinterpret_cast<void*>(entry),
-                reinterpret_cast<void*>(health_entry));
-        }
-    } else if (spirit_entry == 0 && entry == health_entry + kSpiritEntryOffsetFromHealth && actual_type == kSpiritId) {
-        *stat_type = kSpiritId;
-        {
-            std::lock_guard lock(g_state_mutex);
-            TryAssignPlayerResolvedEntry(entry, *stat_type);
-        }
-        const auto current = g_discovery_logs.fetch_add(1, std::memory_order_acq_rel);
-        if (current < 24) {
-            Log("runtime: inferred stat entry from health layout type=%d entry=0x%p health=0x%p",
-                *stat_type,
-                reinterpret_cast<void*>(entry),
-                reinterpret_cast<void*>(health_entry));
-        }
-    }
-
-    return *stat_type >= 0;
-}
-
 bool TryAdjustPlayerStaminaDelta(const ModConfig& config,
                                  const uintptr_t entry,
                                  const TrackedStatEntryKind entry_kind,
@@ -290,25 +201,13 @@ bool TryAdjustSpiritDelta(const uintptr_t entry, int64_t* const delta) {
     return TryAdjustPlayerSpiritDelta(config, entry, entry_kind, actual_type, delta);
 }
 
-bool TryAdjustStatWrite(const uintptr_t entry,
-                        const bool player_context,
-                        const uintptr_t context_root_a,
-                        const uintptr_t context_root_b,
-                        int64_t* const value) {
-    static_cast<void>(context_root_a);
-    static_cast<void>(context_root_b);
-
+bool TryAdjustStatWrite(const uintptr_t entry, int64_t* const value) {
     if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr || !IsPlayerRuntimeReady()) {
         return false;
     }
 
     const auto& config = GetConfig();
     if (!config.general.enabled || entry < kMinimumPointerAddress) {
-        return false;
-    }
-
-    const int32_t actual_type = *reinterpret_cast<const int32_t*>(entry);
-    if (!IsTrackedStat(actual_type)) {
         return false;
     }
 
@@ -328,29 +227,13 @@ bool TryAdjustStatWrite(const uintptr_t entry,
     }
 
     const TrackedStatEntryKind entry_kind = ClassifyTrackedStatEntry(entry);
-
-    if (IsMountTrackedStatEntry(entry_kind)) {
-        // Mount stat locking no longer uses the shared stat-write path.
+    if (entry_kind != TrackedStatEntryKind::PlayerStamina) {
+        // Shared stat-write now only serves the tracked player stamina entry.
         return false;
     }
 
-    int32_t stat_type = ResolveTrackedStatType(entry_kind);
-    if (stat_type < 0 &&
-        !TryResolvePlayerStatTypeFromWrite(entry, actual_type, player_context, &stat_type)) {
-        return false;
-    }
-
-    const TrackedStatEntryKind resolved_entry_kind = ClassifyTrackedStatEntry(entry);
-    if (stat_type == kHealthId || stat_type == kSpiritId) {
-        // Player health and player spirit no longer adjust at the shared stat-write path.
-        return false;
-    }
-
-    if (stat_type == kStaminaId && resolved_entry_kind != TrackedStatEntryKind::PlayerStamina) {
-        // Player stamina may use stat-write, but only for the tracked player stamina entry.
-        return false;
-    }
-
+    const int32_t actual_type = *reinterpret_cast<const int32_t*>(entry);
+    constexpr int32_t stat_type = kStaminaId;
     if (actual_type != stat_type) {
         const auto current = g_process_skip_logs.fetch_add(1, std::memory_order_acq_rel);
         if (current < 24) {
@@ -362,11 +245,6 @@ bool TryAdjustStatWrite(const uintptr_t entry,
         return false;
     }
 
-    StatConfig stat_config{};
-    if (!SelectConfig(config, stat_type, &stat_config)) {
-        return false;
-    }
-
     int64_t adjusted_value = requested_value;
     const int64_t delta = requested_value - old_value;
     if (delta == 0) {
@@ -375,12 +253,12 @@ bool TryAdjustStatWrite(const uintptr_t entry,
 
     if (delta < 0) {
         const int64_t consumed = -delta;
-        const int64_t target_consumption = ScaleDelta(consumed, stat_config.consumption_multiplier);
+        const int64_t target_consumption = ScaleDelta(consumed, config.stamina.consumption_multiplier);
         const int64_t adjustment = consumed - target_consumption;
         adjusted_value = ClampToRange(requested_value + adjustment, 0, max_value);
     } else {
         const int64_t healed = delta;
-        const int64_t target_heal = ScaleDelta(healed, stat_config.heal_multiplier);
+        const int64_t target_heal = ScaleDelta(healed, config.stamina.heal_multiplier);
         const int64_t adjustment = target_heal - healed;
         adjusted_value = ClampToRange(requested_value + adjustment, 0, max_value);
     }
