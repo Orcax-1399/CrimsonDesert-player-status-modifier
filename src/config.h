@@ -112,14 +112,42 @@ inline bool IsMountLockEnabled(const ModConfig& config) {
     return config.mount.enabled && (config.mount.lock_health || config.mount.lock_stamina);
 }
 
+inline bool ShouldInstallStaminaHook(const ModConfig& config) {
+    return config.general.enabled &&
+           (!IsStatConfigNeutral(config.stamina) ||
+            (config.mount.enabled && config.mount.lock_stamina));
+}
+
+inline bool ShouldInstallPlayerStaminaHooks(const ModConfig& config) {
+    static_cast<void>(config);
+    return false;
+}
+
+inline bool ShouldInstallMountStaminaHook(const ModConfig& config) {
+    return config.general.enabled && config.mount.enabled && config.mount.lock_stamina;
+}
+
+inline bool ShouldInstallSpiritHook(const ModConfig& config) {
+    return config.general.enabled && !IsStatConfigNeutral(config.spirit);
+}
+
+inline bool ShouldInstallLegacyStatWriteHook(const ModConfig& config) {
+    return config.general.enabled && !IsStatConfigNeutral(config.stamina);
+}
+
 inline bool ShouldInstallSharedStatHooks(const ModConfig& config) {
-    return config.general.enabled && (IsAnyPlayerStatMultiplierEnabled(config) || IsMountLockEnabled(config));
+    return config.general.enabled &&
+           (ShouldInstallMountStaminaHook(config) ||
+            ShouldInstallLegacyStatWriteHook(config) ||
+            ShouldInstallSpiritHook(config));
 }
 
 inline bool ShouldInstallDamageHook(const ModConfig& config) {
     return config.general.enabled &&
            ((config.damage.outgoing.enabled && config.damage.outgoing.multiplier != 1.0) ||
-            (config.damage.incoming.enabled && config.damage.incoming.multiplier != 1.0));
+            (config.damage.incoming.enabled && config.damage.incoming.multiplier != 1.0) ||
+            (config.mount.enabled && config.mount.lock_health) ||
+            config.health.heal_multiplier != 1.0);
 }
 
 inline bool ShouldInstallItemGainHook(const ModConfig& config) {

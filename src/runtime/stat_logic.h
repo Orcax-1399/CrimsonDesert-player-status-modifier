@@ -3,6 +3,8 @@
 #include <cstdint>
 
 void ObserveStatEntry(uintptr_t entry, uintptr_t component);
+bool TryAdjustSpiritDelta(uintptr_t entry, int64_t* delta);
+bool TryAdjustStaminaDelta(uintptr_t entry, int64_t* delta);
 bool TryAdjustStatWrite(uintptr_t entry,
                         bool player_context,
                         uintptr_t context_root_a,
