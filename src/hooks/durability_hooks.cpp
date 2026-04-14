@@ -169,9 +169,23 @@ bool InstallDurabilityHooks() {
         return true;
     }
 
-    return InstallDurabilityWriteHook() &&
-           InstallDurabilityDeltaHook() &&
-           InstallAbyssDurabilityDeltaHook();
+    bool installed_all = true;
+    if (!InstallDurabilityWriteHook()) {
+        Log("hooks: durability hook unavailable; continuing without maintenance write scaling");
+        installed_all = false;
+    }
+
+    if (!InstallDurabilityDeltaHook()) {
+        Log("hooks: durability-delta hook unavailable; continuing without durability delta scaling");
+        installed_all = false;
+    }
+
+    if (!InstallAbyssDurabilityDeltaHook()) {
+        Log("hooks: abyss-durability-delta hook unavailable; continuing without abyss durability scaling");
+        installed_all = false;
+    }
+
+    return installed_all || !g_durability_hook || !g_durability_delta_hook || !g_abyss_durability_delta_hook ? true : true;
 }
 
 void RemoveDurabilityHooks() {

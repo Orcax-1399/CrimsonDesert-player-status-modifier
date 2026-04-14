@@ -8,9 +8,65 @@
 
 #include <Windows.h>
 
+#include <atomic>
+#include <cstdint>
 #include <thread>
 
 namespace {
+
+constexpr int64_t kDragonHealthMaxThreshold = 2500000;
+constexpr int64_t kDragonStaminaMaxThreshold = 300000;
+std::atomic<std::uint32_t> g_mount_profile_logs{0};
+
+bool TryReadStatMaxValue(const uintptr_t entry, int64_t* const max_value) {
+    if (max_value == nullptr || entry < kMinimumPointerAddress) {
+        return false;
+    }
+
+    __try {
+        *max_value = *reinterpret_cast<const int64_t*>(entry + 0x18);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool IsDragonMountProfile(const ActorResolveSnapshot& snapshot) {
+    if (!snapshot.valid()) {
+        return false;
+    }
+
+    int64_t health_max = 0;
+    int64_t stamina_max = 0;
+    if (!TryReadStatMaxValue(snapshot.health_entry, &health_max) ||
+        !TryReadStatMaxValue(snapshot.stamina_entry, &stamina_max)) {
+        return false;
+    }
+
+    return health_max >= kDragonHealthMaxThreshold &&
+           stamina_max >= kDragonStaminaMaxThreshold;
+}
+
+void LogRejectedMountProfile(const char* const reason, const ActorResolveSnapshot& snapshot) {
+    const auto current = g_mount_profile_logs.fetch_add(1, std::memory_order_acq_rel);
+    if (current >= 24) {
+        return;
+    }
+
+    int64_t health_max = 0;
+    int64_t stamina_max = 0;
+    const bool has_health_max = TryReadStatMaxValue(snapshot.health_entry, &health_max);
+    const bool has_stamina_max = TryReadStatMaxValue(snapshot.stamina_entry, &stamina_max);
+    Log("runtime: rejected mount profile reason=%s actor=0x%p root=0x%p marker=0x%p health=0x%p health_max=%lld stamina=0x%p stamina_max=%lld",
+        reason,
+        reinterpret_cast<void*>(snapshot.actor),
+        reinterpret_cast<void*>(snapshot.root),
+        reinterpret_cast<void*>(snapshot.marker),
+        reinterpret_cast<void*>(snapshot.health_entry),
+        static_cast<long long>(has_health_max ? health_max : -1),
+        reinterpret_cast<void*>(snapshot.stamina_entry),
+        static_cast<long long>(has_stamina_max ? stamina_max : -1));
+}
 
 bool TryResolveCurrentMountCandidateMarker(const ActorResolveSnapshot& player_snapshot, uintptr_t* const marker) {
     if (marker == nullptr || !player_snapshot.valid()) {
@@ -54,6 +110,11 @@ bool TryResolveCurrentMountFromPlayer(const ActorResolveSnapshot& player_snapsho
         return false;
     }
 
+    if (!IsDragonMountProfile(*mount_snapshot)) {
+        LogRejectedMountProfile("ptrchain-candidate", *mount_snapshot);
+        return false;
+    }
+
     return true;
 }
 
@@ -78,25 +139,26 @@ bool TryResolveMountContext(const uintptr_t context_root_a,
         return false;
     }
 
-    if (TryResolveActorResolveFromContextRoot(context_root_a, mount_snapshot, player_snapshot)) {
-        return true;
-    }
-
-    if (TryResolveActorResolveFromContextRoot(context_root_b, mount_snapshot, player_snapshot)) {
-        return true;
-    }
-
     const ActorResolveSnapshot current_mount = g_mount_resolve;
-    if (!current_mount.valid()) {
-        return false;
+    if (current_mount.valid() &&
+        current_mount.marker != player_snapshot.marker &&
+        current_mount.root != player_snapshot.root &&
+        IsDragonMountProfile(current_mount)) {
+        *mount_snapshot = current_mount;
+        return true;
     }
 
-    if (current_mount.marker == player_snapshot.marker || current_mount.root == player_snapshot.root) {
-        return false;
+    if (TryResolveActorResolveFromContextRoot(context_root_a, mount_snapshot, player_snapshot) &&
+        IsDragonMountProfile(*mount_snapshot)) {
+        return true;
     }
 
-    *mount_snapshot = current_mount;
-    return true;
+    if (TryResolveActorResolveFromContextRoot(context_root_b, mount_snapshot, player_snapshot) &&
+        IsDragonMountProfile(*mount_snapshot)) {
+        return true;
+    }
+
+    return false;
 }
 
 void RefreshTrackedMountFromPlayerActor() {

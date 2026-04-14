@@ -11,13 +11,23 @@
 constexpr int32_t kHealthId = 0;
 constexpr int32_t kStaminaId = 17;
 constexpr int32_t kSpiritId = 18;
-constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
-constexpr uintptr_t kBattleDamageReturnAddressRva = 0x1A50BB0;
+inline constexpr uintptr_t kMinimumPointerAddress = 0x10000000;
+constexpr uintptr_t kBattleDamageReturnAddressRva = 0x1A61160;
 constexpr uintptr_t kStaminaEntryOffsetFromHealth = 0x480;
 constexpr uintptr_t kSpiritEntryOffsetFromHealth = 0x510;
 constexpr size_t kTrackedDamageParticipantCount = 16;
 constexpr int kDamageRelationDepth = 6;
 constexpr DWORD kMountResolvePollMs = 1000;
+
+enum class TrackedStatEntryKind {
+    None = 0,
+    PlayerHealth,
+    PlayerStamina,
+    PlayerSpirit,
+    MountHealth,
+    MountStamina,
+    MountSpirit,
+};
 
 struct ActorResolveSnapshot {
     uintptr_t actor = 0;
@@ -54,6 +64,12 @@ extern std::atomic<std::uint32_t> g_affinity_logs;
 extern std::atomic<std::uint32_t> g_mount_logs;
 extern std::atomic<std::uint32_t> g_actor_resolve_logs;
 extern std::atomic<std::uint32_t> g_mount_candidate_logs;
+
+TrackedStatEntryKind ClassifyTrackedStatEntry(uintptr_t entry);
+int32_t ResolveTrackedStatType(TrackedStatEntryKind kind);
+bool IsPlayerTrackedStatEntry(TrackedStatEntryKind kind);
+bool IsMountTrackedStatEntry(TrackedStatEntryKind kind);
+bool IsPlayerRuntimeReady();
 
 void ResetTrackedEntriesLocked();
 void ResetTrackedMountLocked();

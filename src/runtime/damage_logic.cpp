@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "logger.h"
+#include "mod_logic.h"
 #include "runtime/runtime_state.h"
 
 #include <Windows.h>
@@ -13,12 +14,12 @@
 
 namespace {
 
-uintptr_t GetModuleBaseAddress() {
-    return reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-}
-
 uintptr_t TryGetTrackedPlayerTargetOwner() {
     return g_player_resolve.damage_target;
+}
+
+uintptr_t TryGetTrackedMountTargetOwner() {
+    return g_mount_resolve.damage_target;
 }
 
 bool IsTrackedDamageParticipant(const uintptr_t candidate) {
@@ -141,33 +142,109 @@ bool IsOutgoingPlayerDamageSource(const uintptr_t source_context) {
 
 }  // namespace
 
+bool IsRelevantDamageEvent(const uintptr_t target,
+                           const int32_t status_id,
+                           const uintptr_t source_context,
+                           const int64_t delta) {
+    if (!g_runtime_enabled.load(std::memory_order_acquire) ||
+        !IsPlayerRuntimeReady() ||
+        status_id != kHealthId ||
+        delta == 0) {
+        return false;
+    }
+
+    const uintptr_t player_target_owner = TryGetTrackedPlayerTargetOwner();
+    if (target >= kMinimumPointerAddress &&
+        player_target_owner >= kMinimumPointerAddress &&
+        target == player_target_owner) {
+        return true;
+    }
+
+    const uintptr_t mount_target_owner = TryGetTrackedMountTargetOwner();
+    if (target >= kMinimumPointerAddress &&
+        mount_target_owner >= kMinimumPointerAddress &&
+        target == mount_target_owner) {
+        return true;
+    }
+
+    return IsOutgoingPlayerDamageSource(source_context);
+}
+
 bool TryScalePlayerDamage(const uintptr_t target,
                           const int32_t status_id,
                           const uintptr_t return_address,
                           const uintptr_t source_context,
                           int64_t* const value) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
+    static_cast<void>(return_address);
+
+    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr || !IsPlayerRuntimeReady()) {
         return false;
     }
 
     const auto& config = GetConfig();
-    if (!config.general.enabled) {
+    if (!config.general.enabled || status_id != kHealthId || *value == 0) {
         return false;
     }
 
-    if (status_id != kHealthId || *value >= 0) {
-        return false;
+    UpdateTrackedMountFromHealthRoot(target);
+
+    const uintptr_t mount_target_owner = TryGetTrackedMountTargetOwner();
+    if (config.mount.enabled &&
+        config.mount.lock_health &&
+        *value < 0 &&
+        target >= kMinimumPointerAddress &&
+        mount_target_owner >= kMinimumPointerAddress &&
+        target == mount_target_owner) {
+        if (*value == std::numeric_limits<int64_t>::min()) {
+            *value = std::numeric_limits<int64_t>::max();
+        } else {
+            *value = -*value;
+        }
+
+        g_damage_logs.fetch_add(1, std::memory_order_acq_rel);
+        Log("runtime: scaled damage direction=%s target=0x%p sourceCtx=0x%p final=%lld",
+            "mount-lock-health",
+            reinterpret_cast<void*>(target),
+            reinterpret_cast<void*>(source_context),
+            static_cast<long long>(*value));
+        return true;
     }
 
-    const uintptr_t module_base = GetModuleBaseAddress();
-    if (module_base < kMinimumPointerAddress || return_address != module_base + kBattleDamageReturnAddressRva) {
+    const uintptr_t player_target_owner = TryGetTrackedPlayerTargetOwner();
+    if (target >= kMinimumPointerAddress &&
+        player_target_owner >= kMinimumPointerAddress &&
+        target == player_target_owner &&
+        *value > 0) {
+        if (config.health.heal_multiplier == 1.0) {
+            return false;
+        }
+
+        const double scaled = std::floor(static_cast<double>(*value) * config.health.heal_multiplier);
+        if (scaled <= 0.0) {
+            *value = 0;
+        } else if (scaled >= static_cast<double>(std::numeric_limits<int64_t>::max())) {
+            *value = std::numeric_limits<int64_t>::max();
+        } else {
+            *value = static_cast<int64_t>(scaled);
+        }
+
+        g_damage_logs.fetch_add(1, std::memory_order_acq_rel);
+        Log("runtime: scaled damage direction=%s target=0x%p sourceCtx=0x%p final=%lld multiplier=%.3f",
+            "incoming-heal",
+            reinterpret_cast<void*>(target),
+            reinterpret_cast<void*>(source_context),
+            static_cast<long long>(*value),
+            config.health.heal_multiplier);
+
+        return true;
+    }
+
+    if (*value > 0) {
         return false;
     }
 
     DamageChannelConfig channel{};
     const char* direction = nullptr;
-
-    const uintptr_t player_target_owner = TryGetTrackedPlayerTargetOwner();
     if (target >= kMinimumPointerAddress && player_target_owner >= kMinimumPointerAddress && target == player_target_owner) {
         channel = config.damage.incoming;
         direction = "incoming-damage";
@@ -191,16 +268,13 @@ bool TryScalePlayerDamage(const uintptr_t target,
         *value = static_cast<int64_t>(scaled);
     }
 
-    const auto current = g_damage_logs.fetch_add(1, std::memory_order_acq_rel);
-    if (current < 24) {
-        Log("runtime: scaled damage direction=%s target=0x%p sourceCtx=0x%p ret=0x%p final=%lld multiplier=%.3f",
-            direction,
-            reinterpret_cast<void*>(target),
-            reinterpret_cast<void*>(source_context),
-            reinterpret_cast<void*>(return_address),
-            static_cast<long long>(*value),
-            channel.multiplier);
-    }
+    g_damage_logs.fetch_add(1, std::memory_order_acq_rel);
+    Log("runtime: scaled damage direction=%s target=0x%p sourceCtx=0x%p final=%lld multiplier=%.3f",
+        direction,
+        reinterpret_cast<void*>(target),
+        reinterpret_cast<void*>(source_context),
+        static_cast<long long>(*value),
+        channel.multiplier);
 
     return true;
 }

@@ -49,7 +49,7 @@ bool ShouldSkipDurabilityConsumption(const uintptr_t entry, const double chance)
 }  // namespace
 
 bool TryAdjustDurabilityWrite(const uintptr_t entry, uint16_t* const value) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
+    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr || !IsPlayerRuntimeReady()) {
         return false;
     }
 
@@ -88,7 +88,7 @@ bool TryAdjustDurabilityWrite(const uintptr_t entry, uint16_t* const value) {
 }
 
 bool TryAdjustDurabilityDelta(const uintptr_t entry, const uint16_t current_value, int16_t* const delta) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || delta == nullptr) {
+    if (!g_runtime_enabled.load(std::memory_order_acquire) || delta == nullptr || !IsPlayerRuntimeReady()) {
         return false;
     }
 

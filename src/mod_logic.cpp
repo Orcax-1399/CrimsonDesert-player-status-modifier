@@ -10,6 +10,60 @@
 #include <cstdint>
 #include <limits>
 
+namespace {
+
+constexpr int64_t kDragonHealthMaxThreshold = 2500000;
+constexpr int64_t kDragonStaminaMaxThreshold = 300000;
+
+bool TryReadStatMaxValue(const uintptr_t entry, int64_t* const max_value) {
+    if (max_value == nullptr || entry < kMinimumPointerAddress) {
+        return false;
+    }
+
+    __try {
+        *max_value = *reinterpret_cast<const int64_t*>(entry + 0x18);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool IsDragonMountProfile(const ActorResolveSnapshot& snapshot) {
+    if (!snapshot.valid()) {
+        return false;
+    }
+
+    int64_t health_max = 0;
+    int64_t stamina_max = 0;
+    if (!TryReadStatMaxValue(snapshot.health_entry, &health_max) ||
+        !TryReadStatMaxValue(snapshot.stamina_entry, &stamina_max)) {
+        return false;
+    }
+
+    return health_max >= kDragonHealthMaxThreshold &&
+           stamina_max >= kDragonStaminaMaxThreshold;
+}
+
+bool TryResolveMountSnapshotFromContextRoot(const uintptr_t context_root,
+                                           ActorResolveSnapshot* const resolved) {
+    if (resolved == nullptr || context_root < kMinimumPointerAddress) {
+        return false;
+    }
+
+    const ActorResolveSnapshot player_snapshot = g_player_resolve;
+    if (!player_snapshot.valid()) {
+        return false;
+    }
+
+    if (!TryResolveActorResolveFromContextRoot(context_root, resolved, player_snapshot)) {
+        return false;
+    }
+
+    return IsDragonMountProfile(*resolved);
+}
+
+}  // namespace
+
 void ResetRuntimeState() {
     std::lock_guard lock(g_state_mutex);
     g_player_resolve = {};
@@ -32,7 +86,7 @@ void StopMountResolver() {
 }
 
 bool TryScaleItemGain(const int64_t amount, int64_t* const value) {
-    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr) {
+    if (!g_runtime_enabled.load(std::memory_order_acquire) || value == nullptr || !IsPlayerRuntimeReady()) {
         return false;
     }
 
@@ -54,6 +108,32 @@ bool TryScaleItemGain(const int64_t amount, int64_t* const value) {
 
     *value = static_cast<int64_t>(scaled);
     return *value != amount;
+}
+
+void UpdateTrackedMountFromHealthRoot(const uintptr_t root) {
+    ActorResolveSnapshot resolved{};
+    if (!TryResolveMountSnapshotFromContextRoot(root, &resolved)) {
+        return;
+    }
+
+    UpdateTrackedMountStatusComponent(resolved.actor, resolved.marker);
+}
+
+void UpdateTrackedMountFromStaminaContext(const uintptr_t stamina_entry, const uintptr_t context_root) {
+    if (stamina_entry < kMinimumPointerAddress) {
+        return;
+    }
+
+    ActorResolveSnapshot resolved{};
+    if (!TryResolveMountSnapshotFromContextRoot(context_root, &resolved)) {
+        return;
+    }
+
+    if (resolved.stamina_entry != stamina_entry) {
+        return;
+    }
+
+    UpdateTrackedMountStatusComponent(resolved.actor, resolved.marker);
 }
 
 void UpdateTrackedMountStatusComponent(const uintptr_t actor, const uintptr_t marker) {
@@ -150,6 +230,14 @@ uintptr_t GetTrackedMountStatusMarker() {
 
 uintptr_t GetTrackedPlayerActor() {
     return g_player_resolve.actor;
+}
+
+uintptr_t GetTrackedPlayerSpiritEntry() {
+    return g_player_resolve.spirit_entry;
+}
+
+uintptr_t GetTrackedPlayerStaminaEntry() {
+    return g_player_resolve.stamina_entry;
 }
 
 uintptr_t GetTrackedPlayerStatusMarker() {

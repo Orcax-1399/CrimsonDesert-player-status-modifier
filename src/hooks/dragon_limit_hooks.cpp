@@ -194,15 +194,15 @@ bool InstallDragonLimitHooks() {
     const auto config = GetConfig();
 
     if (ShouldInstallDragonVillageSummonHook(config) && !InstallDragonVillageSummonHook()) {
-        return false;
+        Log("hooks: dragon-village-summon unavailable; continuing without village summon bypass");
     }
 
     if (ShouldInstallDragonFlyingRestrictHook(config) && !InstallDragonFlyingRestrictHook()) {
-        return false;
+        Log("hooks: dragon-flying-restrict unavailable; continuing without flying restrict bypass");
     }
 
     if (ShouldInstallDragonRoofRestrictHook(config) && !InstallDragonRoofRestrictHook()) {
-        return false;
+        Log("hooks: dragon-roof-restrict unavailable; continuing without roof summon bypass");
     }
 
     return true;

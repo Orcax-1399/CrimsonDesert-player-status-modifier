@@ -10,7 +10,8 @@ Current runtime behavior is split across several hook paths:
 
 - player pointer capture
 - player stat entry discovery
-- source stat write interception
+- spirit signed-delta interception
+- mount stamina AB00 interception
 - dragon village summon bypass
 - dragon forced-dismount result rewrite
 - dragon roof summon experimental bypass
@@ -23,7 +24,13 @@ Current runtime behavior is split across several hook paths:
 - optional position horizontal movement scaling
 - automatic config hot reload
 
-For health, stamina, and spirit, the mod no longer relies only on read-side compensation. It first discovers the player's real stat entries, then adjusts values at the main write path when the write target matches a discovered player entry.
+For player stats, the runtime is now split by semantics instead of forcing everything through one shared write path:
+
+- `stats` only discovers the player's real stat entries
+- `spirit` adjusts signed delta at `CrimsonDesert.exe+C6A72AB`
+- `player health` recovery scaling currently rides the incoming-damage semantic path
+- `player stamina` is no longer scaled at the shared write path or at `AB00`
+- `mount stamina` still uses `AB00` because that feature only needs a direct lock
 
 ## Current Features
 
@@ -58,9 +65,13 @@ The mod also watches `player-status-modifier.ini` in the background and reloads 
 Hook installation policy:
 
 - player-pointer capture always stays installed because the rest of the runtime depends on it
-- shared player stat hooks (`stats` + `stat-write`) are only installed when at least one of `Health`, `Stamina`, or `Spirit` is not neutral (`1.0 / 1.0`), or mount stat locking is enabled
+- shared player stat discovery stays centered on `stats`, while the runtime only installs the semantic hooks it actually needs (`spirit-delta`, `stamina-ab00`)
+- `spirit-delta` is installed only when `Spirit` is not neutral (`1.0 / 1.0`)
+- `stamina-ab00` is installed only when `Stamina` is not neutral or mount stamina lock is enabled
 - damage, items, affinity, durability, dragon-limit, and position-control hooks are only installed when their corresponding feature is actually enabled in the config
 - if an INI edit changes the required hook loadout, the watcher logs a restart warning; toggling hooks on or off still requires a game restart
+
+`Spirit` now uses a dedicated signed-delta semantic site rather than the legacy shared `stat-write` path. See [research-note-spirit.md](/D:/Workspace/cpp/CrimsonDesertASI/stamina-spirit/research-note-spirit.md) for the validated route, register semantics, and AOB selection rationale.
 
 The repository now also includes `player-status-modifier.default.ini` as a clean baseline. Use it as a reference or restore point if your live config drifts too far during testing.
 
@@ -154,8 +165,11 @@ Damage fields:
 
 Affinity fields:
 
-- `Multiplier` scales committed affinity gain writes and is clamped by the game-side cap
-- `1.0` keeps affinity unchanged and skips installing the affinity write hooks entirely
+- `Multiplier` scales positive affinity deltas before the game commits the updated value
+- the hook rewrites the pending `record + 0x10` value using `old_value + floor((new_value - old_value) * multiplier)`
+- non-positive deltas are left untouched
+- the final value is clamped to the game-side cap (`100`)
+- `1.0` keeps affinity unchanged and skips installing the affinity hook entirely
 
 Mount fields:
 
