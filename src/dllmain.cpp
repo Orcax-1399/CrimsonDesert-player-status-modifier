@@ -48,17 +48,21 @@ DWORD WINAPI InitializeMod(LPVOID) {
         return 0;
     }
 
-    const auto config_path = GetSiblingPath(L"player-status-modifier.ini");
-    const auto log_path = GetSiblingPath(L"player-status-modifier.log");
+        const auto config_path = GetSiblingPath(L"player-status-modifier.ini");
+        const auto log_path = GetSiblingPath(L"player-status-modifier.log");
 
-    LoadConfig(config_path);
-    InitializeLogger(log_path, GetConfig().general.log_enabled);
+        LoadConfig(config_path);
+        const ModConfig initial_config = GetConfig();
+        InitializeLogger(log_path,
+                         initial_config.general.log_enabled,
+                         initial_config.general.verbose,
+                         initial_config.general.max_log_lines);
 
-    Log("dllmain: initialization started");
-    Log("dllmain: host process = %ls", host_process_path.c_str());
-    Log("dllmain: config path = %ls", config_path.c_str());
+        Log("dllmain: initialization started");
+        Log("dllmain: host process = %ls", host_process_path.c_str());
+        Log("dllmain: config path = %ls", config_path.c_str());
 
-    const auto init_delay = GetConfig().general.init_delay_ms;
+        const auto init_delay = initial_config.general.init_delay_ms;
     if (init_delay > 0) {
         Sleep(init_delay);
     }

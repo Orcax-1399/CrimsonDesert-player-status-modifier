@@ -47,16 +47,18 @@ bool TryGetLastWriteTimestamp(const std::wstring& path, ULONGLONG* const timesta
     return true;
 }
 
-void ApplyLoggerReload(const bool previous_enabled, const bool current_enabled) {
-    if (previous_enabled && !current_enabled) {
+void ApplyLoggerReload(const GeneralConfig& previous, const GeneralConfig& current) {
+    if (previous.log_enabled && !current.log_enabled) {
         Log("config-watcher: config reloaded, disabling logger");
-        SetLoggerEnabled(false);
+        UpdateLoggerConfig(false, current.verbose, current.max_log_lines);
         return;
     }
 
-    SetLoggerEnabled(current_enabled);
-    if (current_enabled) {
-        Log("config-watcher: config reloaded");
+    UpdateLoggerConfig(current.log_enabled, current.verbose, current.max_log_lines);
+    if (current.log_enabled) {
+        Log("config-watcher: config reloaded (verbose=%d max-log-lines=%lu)",
+            current.verbose ? 1 : 0,
+            static_cast<unsigned long>(current.max_log_lines));
     }
 }
 
@@ -116,7 +118,7 @@ void ConfigWatcherLoop() {
         }
 
             SetConfigSnapshot(config_path, next);
-            ApplyLoggerReload(previous.general.log_enabled, next.general.log_enabled);
+                ApplyLoggerReload(previous.general, next.general);
 
             if (DidHookRequirementsChange(previous, next) && next.general.log_enabled) {
                 Log("config-watcher: hook loadout changed; restart game to apply hook enable/disable changes");

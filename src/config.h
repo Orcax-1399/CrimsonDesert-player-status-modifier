@@ -75,6 +75,8 @@ struct DragonLimitConfig {
 struct GeneralConfig {
     bool enabled = true;
     bool log_enabled = true;
+    bool verbose = false;
+    DWORD max_log_lines = 2000;
     DWORD init_delay_ms = 3000;
     DWORD stale_component_ms = 60000;
     DWORD relock_idle_ms = 10000;

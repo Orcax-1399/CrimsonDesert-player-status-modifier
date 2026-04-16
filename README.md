@@ -94,6 +94,8 @@ Default config:
 [General]
 Enabled=1
 LogEnabled=1
+verbose=0
+MaxLogLines=2000
 InitDelayMs=3000
 StaleComponentMs=60000
 RelockIdleMs=10000

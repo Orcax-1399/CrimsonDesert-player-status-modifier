@@ -13,6 +13,9 @@ std::mutex g_log_mutex;
 std::filesystem::path g_log_path;
 HANDLE g_log_handle = INVALID_HANDLE_VALUE;
 bool g_log_enabled = false;
+bool g_log_verbose = false;
+DWORD g_log_max_lines = 2000;
+uint64_t g_log_line_count = 0;
 
 void CloseLogHandle() {
     if (g_log_handle == INVALID_HANDLE_VALUE) {
@@ -22,6 +25,47 @@ void CloseLogHandle() {
     FlushFileBuffers(g_log_handle);
     CloseHandle(g_log_handle);
     g_log_handle = INVALID_HANDLE_VALUE;
+    g_log_line_count = 0;
+}
+
+DWORD SanitizeMaxLogLines(const DWORD max_log_lines) {
+    if (max_log_lines == 0) {
+        return 2000;
+    }
+
+    if (max_log_lines > 1000000) {
+        return 1000000;
+    }
+
+    return max_log_lines;
+}
+
+void RefreshLogLineCountLocked() {
+    if (g_log_handle == INVALID_HANDLE_VALUE) {
+        g_log_line_count = 0;
+        return;
+    }
+
+    LARGE_INTEGER zero{};
+    if (!SetFilePointerEx(g_log_handle, zero, nullptr, FILE_BEGIN)) {
+        g_log_line_count = 0;
+        return;
+    }
+
+    char buffer[4096]{};
+    uint64_t line_count = 0;
+    DWORD bytes_read = 0;
+    while (ReadFile(g_log_handle, buffer, sizeof(buffer), &bytes_read, nullptr) && bytes_read > 0) {
+        for (DWORD i = 0; i < bytes_read; ++i) {
+            if (buffer[i] == '\n') {
+                ++line_count;
+            }
+        }
+    }
+
+    zero.QuadPart = 0;
+    SetFilePointerEx(g_log_handle, zero, nullptr, FILE_END);
+    g_log_line_count = line_count;
 }
 
 bool OpenLogHandle(const DWORD creation_disposition) {
@@ -32,22 +76,37 @@ bool OpenLogHandle(const DWORD creation_disposition) {
     CloseLogHandle();
 
     g_log_handle = CreateFileW(g_log_path.c_str(),
-                               FILE_APPEND_DATA,
+                               FILE_APPEND_DATA | GENERIC_READ,
                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                nullptr,
                                creation_disposition,
                                FILE_ATTRIBUTE_NORMAL,
                                nullptr);
-    return g_log_handle != INVALID_HANDLE_VALUE;
+    if (g_log_handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    if (creation_disposition == CREATE_ALWAYS) {
+        g_log_line_count = 0;
+    } else {
+        RefreshLogLineCountLocked();
+    }
+
+    return true;
 }
 
 }  // namespace
 
-bool InitializeLogger(const std::wstring& path, const bool enabled) {
+bool InitializeLogger(const std::wstring& path,
+                      const bool enabled,
+                      const bool verbose,
+                      const DWORD max_log_lines) {
     std::lock_guard lock(g_log_mutex);
 
     g_log_path = std::filesystem::path(path);
     g_log_enabled = enabled;
+    g_log_verbose = verbose;
+    g_log_max_lines = SanitizeMaxLogLines(max_log_lines);
     if (!g_log_enabled) {
         CloseLogHandle();
         return true;
@@ -56,8 +115,11 @@ bool InitializeLogger(const std::wstring& path, const bool enabled) {
     return OpenLogHandle(CREATE_ALWAYS);
 }
 
-void SetLoggerEnabled(const bool enabled) {
+void UpdateLoggerConfig(const bool enabled, const bool verbose, const DWORD max_log_lines) {
     std::lock_guard lock(g_log_mutex);
+
+    g_log_verbose = verbose;
+    g_log_max_lines = SanitizeMaxLogLines(max_log_lines);
 
     if (!enabled) {
         CloseLogHandle();
@@ -70,6 +132,7 @@ void SetLoggerEnabled(const bool enabled) {
         return;
     }
 
+    RefreshLogLineCountLocked();
     g_log_enabled = true;
 }
 
@@ -123,6 +186,13 @@ void Log(const char* format, ...) {
         return;
     }
 
+    if (!g_log_verbose) {
+        const uint64_t max_lines = static_cast<uint64_t>(g_log_max_lines);
+        if (g_log_line_count >= max_lines) {
+            return;
+        }
+    }
+
     DWORD bytes_written = 0;
     if (!WriteFile(g_log_handle,
                    line,
@@ -131,6 +201,8 @@ void Log(const char* format, ...) {
                    nullptr)) {
         return;
     }
+
+    ++g_log_line_count;
 
     FlushFileBuffers(g_log_handle);
 }

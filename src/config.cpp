@@ -72,13 +72,19 @@ double ClampDouble(const double value, const double minimum, const double maximu
 }
 
 void SanitizeConfig(ModConfig* const next) {
-    if (next == nullptr) {
-        return;
-    }
+        if (next == nullptr) {
+            return;
+        }
 
-    if (next->general.stale_component_ms == 0) {
-        next->general.stale_component_ms = 60000;
-    }
+        if (next->general.max_log_lines == 0) {
+            next->general.max_log_lines = 2000;
+        } else if (next->general.max_log_lines > 1000000) {
+            next->general.max_log_lines = 1000000;
+        }
+
+        if (next->general.stale_component_ms == 0) {
+            next->general.stale_component_ms = 60000;
+        }
 
     if (next->general.relock_idle_ms == 0) {
         next->general.relock_idle_ms = 10000;
@@ -119,6 +125,9 @@ bool ReadConfigSnapshot(const std::wstring& config_path, ModConfig* const config
 
     next.general.enabled = ReadBool(L"General", L"Enabled", next.general.enabled, config_path);
     next.general.log_enabled = ReadBool(L"General", L"LogEnabled", next.general.log_enabled, config_path);
+    next.general.verbose = ReadBool(L"General", L"Verbose", next.general.verbose, config_path);
+    next.general.max_log_lines =
+        ReadDword(L"General", L"MaxLogLines", next.general.max_log_lines, config_path);
     next.general.init_delay_ms = ReadDword(L"General", L"InitDelayMs", next.general.init_delay_ms, config_path);
     next.general.stale_component_ms = ReadDword(L"General", L"StaleComponentMs", next.general.stale_component_ms, config_path);
     next.general.relock_idle_ms = ReadDword(L"General", L"RelockIdleMs", next.general.relock_idle_ms, config_path);
